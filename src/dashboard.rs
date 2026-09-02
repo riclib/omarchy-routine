@@ -258,11 +258,14 @@ pub fn build(client: &Client, jrn: &Journal) -> Result<(String, Value), String> 
 mod tests {
     use super::*;
 
+    // Shaped like a real Teams invite — the join link buried among dial-in
+    // numbers, an untrusted aka.ms link first, and the useful one wrapped in
+    // angle brackets. Every identifier here is invented.
     const TEAMS: &str = "________________\nMicrosoft Teams meeting\nJoin: \
         https://teams.microsoft.com/meet/000000000000000?p=EXAMPLEEXAMPLE\n\
         Meeting ID: 000 000 000 000\nPasscode: xxxxxxxx\n\
         Need help?<https://aka.ms/JoinTeamsMeeting?omkt=en-US> | System reference\
-        <https://teams.microsoft.com/l/meetup-join/19%3ameeting_ZDc5@thread.v2/0>\n\
+        <https://teams.microsoft.com/l/meetup-join/19%3ameeting_EXAMPLE@thread.v2/0>\n\
         Dial in by phone +1 555-000-0000,,000000000#";
 
     #[test]

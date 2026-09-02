@@ -159,8 +159,8 @@ mod tests {
     fn an_underscore_inside_a_word_is_not_emphasis() {
         // An id is the thing most likely to be reported back, and the thing
         // most damaged by losing a character out of the middle of it.
-        assert_eq!(strip_inline("task:b0bvpSXg0S_DHAvVxhu2W"), "task:b0bvpSXg0S_DHAvVxhu2W");
-        assert_eq!(strip_inline("table:daily_notes__example"), "table:daily_notes__example");
+        assert_eq!(strip_inline("task:aB0_cD1eF2gH3iJ4kL5m"), "task:aB0_cD1eF2gH3iJ4kL5m");
+        assert_eq!(strip_inline("table:daily_notes__abc123"), "table:daily_notes__abc123");
         assert_eq!(strip_inline("see _that_ file"), "see that file");
     }
 

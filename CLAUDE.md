@@ -51,7 +51,7 @@ entire journal table with every note body **1.5 ms** (28 kB), all 121 tasks
 **3 ms**. Nothing here touches the network.
 
 Routine is local-first. The workspace lives in one file —
-`~/.local/share/Routine/workspaces/<workspace-id>`, 7.9 MB here — which is a
+`~/.local/share/Routine/workspaces/<workspace-id>`, 7.9 MB on this machine — which is a
 bespoke length-prefixed binary op log (`01 00 00 00…` then a length-prefixed
 nanoid; not SQLite, not LevelDB, not Automerge) carrying operations from 166
 device actors. **There is no IndexedDB**: nothing mirrors that log into the
@@ -90,7 +90,7 @@ Find it the way anything else undocumented is found:
 
 ```json
 search_search  {"query": "project", "kind": {"type": "table"}}
-→ table_ref:EXAMPLEWORKSPACE00000:EXAMPLETABLEID000000  "projects (Project)"
+→ table_ref:<workspace>:<nanoid>  "projects (Project)"
 ```
 
 Note the id comes back as `table_ref:<workspace>:<nanoid>`; the table tools want
@@ -156,7 +156,7 @@ Both are one call. Neither is sufficient alone.
 ## The journal, and how to append without destroying it
 
 Routine's daily note is a row in a user-defined table (`journal`, here
-`table:daily_notes__example`) with two columns, `Title` and `Notes`. The
+`table:daily_notes__…`) with two columns, `Title` and `Notes`. The
 `Notes` document is a list of typed blocks — and the todo blocks in it are
 bound to real tasks. **The daily note is the task list.**
 
@@ -172,8 +172,8 @@ you are not adding by reference, append yours, write the lot:
 
 ```json
 {"blocks":[
-  {"type":"existing","id":"block:sDrArgOdgx4yQKNZszrpK"},
-  {"type":"existing","id":"block:ALM-1XGR1tNxCiepn5UQp"},
+  {"type":"existing","id":"block:…"},
+  {"type":"existing","id":"block:…"},
   {"type":"paragraph","content":"the new line"}
 ]}
 ```
@@ -188,11 +188,11 @@ level, retracted), `bullet` (list_type, depth), `check` (checked, depth), `todo`
 (checked, content, task), `blockquote`, `code` (language), `divider`, `embed`.
 
 **Blocks exist that are not on that list, and they are not hypothetical.** A
-project note here holds a `query` block — Routine has a query language
-embedded in documents:
+project note here holds a `query` block — Routine has a query language embedded
+in documents:
 
 ```
-tasks where 'Project'._routine.id = "row:EXAMPLEROWID00000000"
+tasks where 'Project'._routine.id = "row:…"
 index by 'Status' as _routine_source_database
 select (…)
 ```
@@ -354,10 +354,11 @@ than by prompting harder: it flattened `time` into top-level
 `start_time`/`end_time` (no tool schema to copy), and it fenced its JSON in
 ` ```json `. Model output is another untrusted string arriving at the shell.
 
-Giving it the read tools did buy real judgement — it disambiguated one of four
-contacts sharing a first name by reading which project it was about. Haiku without tools did not.
-If that is wanted back, the helper should do the contact search and put the
-candidates in the context, not hand over the tool.
+Giving it the read tools did buy real judgement — asked to schedule a call with
+someone by first name only, it picked the right one of four contacts sharing
+that name by reading which project the call was about. Haiku without tools did
+not. If that is wanted back, the helper should do the contact search and put the
+candidates into the context rather than handing over the tool.
 
 ## House rules
 
