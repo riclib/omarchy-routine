@@ -6,6 +6,7 @@
 //! retry is involved, it belongs here rather than in QML or a prompt.
 
 mod auth;
+mod dashboard;
 mod journal;
 mod mcp;
 mod md;
@@ -75,6 +76,11 @@ enum Command {
     Today,
     /// The next event, and how long there is before it
     Next,
+    /// Everything the bar widget needs, in one call
+    ///
+    /// Today's events with a join link for the next one, and the tasks in
+    /// play — the note's checkboxes and anything scheduled, reconciled.
+    Dashboard,
     /// Check the connection and say what is wrong when there is something wrong
     Doctor,
     /// The token, and whether anything else is holding a copy that has gone stale
@@ -132,6 +138,13 @@ fn run() -> Result<(), String> {
         Command::Log(args) => log(args, format),
         Command::Today => today_cmd(format),
         Command::Next => next_cmd(format),
+        Command::Dashboard => {
+            let client = mcp::Client::connect().map_err(|e| e.to_string())?;
+            let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
+            let (md, payload) = dashboard::build(&client, &jrn)?;
+            render::emit(&md, &payload, format);
+            Ok(())
+        }
         Command::Doctor => doctor(),
         Command::Auth { mcp_config } => {
             let (md, payload) = if mcp_config { auth::mcp_config()? } else { auth::status()? };
