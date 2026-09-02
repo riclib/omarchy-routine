@@ -10,10 +10,13 @@ tasks, a quick-create box. It takes anywhere between instant and 20–60s to loa
 and sometimes never. Everything it renders is reachable over Routine's MCP
 server, so the widget can be a Quickshell overlay that is always there.
 
-Nothing here is built yet. What *is* established is the data layer below, all of
-it measured against a live server on 2026-09-02 (Routine MCP server 2.2.0,
-`routine-mcp-server`, 52 tools). Re-verify after a Routine update; the app is
-young and several of these are behaviours rather than contracts.
+**What exists:** `rtn`, the Rust CLI everything else goes through, and the
+plugin — a bar countdown and the dashboard overlay. What is *not* built is the
+bar panel, which would be a smaller version of the overlay.
+
+Everything below was measured against a live server on 2026-09-02 (Routine MCP
+server 2.2.0, `routine-mcp-server`, 52 tools). Re-verify after a Routine update;
+the app is young and several of these are behaviours rather than contracts.
 
 ## The transport
 
