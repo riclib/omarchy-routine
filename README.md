@@ -24,7 +24,21 @@ rtn log --date=2026-08-09 --historical < old.md   # backfill, minting no tasks
 rtn today            # the day: events, and the tasks in play
 rtn next             # the next event
 rtn doctor           # is any of this going to work, and if not why not
+rtn auth             # the token, and whether another client holds a stale copy
 ```
+
+There is no login. Routine's token file is the credential and `rtn` re-reads it
+every call, so it has nothing of its own to go stale. `rtn auth` is for the
+clients that *do* keep a copy — Claude Code stores a literal `Authorization`
+header, and anything that regenerates the token leaves it 401ing in a way that
+does not look like an auth problem.
+
+```bash
+rtn auth --mcp-config > ~/.config/routine-mcp.json && chmod 600 $_
+```
+
+writes a config another MCP client can load, without the token passing through
+a terminal or a chat.
 
 Output comes in four shapes, chosen by a global flag:
 

@@ -5,6 +5,7 @@
 //! Nothing else in this project talks to MCP; if a credential, a bound or a
 //! retry is involved, it belongs here rather than in QML or a prompt.
 
+mod auth;
 mod journal;
 mod mcp;
 mod md;
@@ -76,6 +77,15 @@ enum Command {
     Next,
     /// Check the connection and say what is wrong when there is something wrong
     Doctor,
+    /// The token, and whether anything else is holding a copy that has gone stale
+    ///
+    /// There is no login here: Routine's token file is the credential and rtn
+    /// re-reads it every call. This is for the clients that do not.
+    Auth {
+        /// Print an MCP client config carrying the token, to redirect to a file
+        #[arg(long)]
+        mcp_config: bool,
+    },
 }
 
 #[derive(Args)]
@@ -123,6 +133,17 @@ fn run() -> Result<(), String> {
         Command::Today => today_cmd(format),
         Command::Next => next_cmd(format),
         Command::Doctor => doctor(),
+        Command::Auth { mcp_config } => {
+            let (md, payload) = if mcp_config { auth::mcp_config()? } else { auth::status()? };
+            // A config is a document, not a rendering of one -- printing it
+            // through the markdown path would mangle the JSON it has to be.
+            if mcp_config {
+                println!("{md}");
+            } else {
+                render::emit(&md, &payload, format);
+            }
+            Ok(())
+        }
     }
 }
 
