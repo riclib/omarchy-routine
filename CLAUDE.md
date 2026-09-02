@@ -41,6 +41,33 @@ curl -sS -X POST http://127.0.0.1:8765/mcp \
 - The port only exists while Routine is running, so "app is closed" arrives as
   a connection refusal, not a hang. Bad token is a clean 401.
 
+### It is a memory read, not a network call
+
+Measured, five reps each: a week of events **5 ms**, today's tasks **1 ms**, the
+entire journal table with every note body **1.5 ms** (28 kB), all 121 tasks
+**3 ms**. Nothing here touches the network.
+
+Routine is local-first. The workspace lives in one file —
+`~/.local/share/Routine/workspaces/<workspace-id>`, 7.9 MB here — which is a
+bespoke length-prefixed binary op log (`01 00 00 00…` then a length-prefixed
+nanoid; not SQLite, not LevelDB, not Automerge) carrying operations from 166
+device actors. **There is no IndexedDB**: nothing mirrors that log into the
+renderer, and Local Storage holds 20 kB of Segment ids and spellcheck settings.
+State is hydrated in memory in the main process, and the MCP server runs inside
+that same process — which is why it answers in single-digit milliseconds.
+
+**Do not read the op log directly.** No schema, no index, no documentation,
+rewritten live, and it would break on any Routine update. It is also `0644`
+under `0755` directories, so every note, contact and calendar entry is readable
+by any local process — Routine's choice, worth knowing, and not a reason to add
+a second reader.
+
+**What this says about the plugin.** The dashboard takes between instant and a
+minute to load while the data behind it answers in milliseconds, from the same
+process. So the slowness is the Electron renderer and window lifecycle, not data
+access. The overlay is not a workaround for a slow backend; it is a fast
+renderer over a source that was never the problem.
+
 ## Response shapes, which are not uniform
 
 Most tools return `result.structuredContent` already parsed. **Two do not** and
@@ -288,9 +315,13 @@ Inherited from `riclib.capacities`, which earned them under marketplace review.
 
 - **The QML never talks to the API.** Token, bounding, caching and queueing live
   in `bin/`. A credential does not belong in the shell's process state.
-- **Nothing polls.** A user action refreshes. The one live thing is the
-  countdown ring, and it is local arithmetic on a single fetched timestamp — the
-  data costs one call, the ticking costs nothing.
+- **Refresh on a user action; a slow tick is affordable.** Capacities forbids
+  polling outright because its quotas are 10 requests per 60s. That rationale
+  does not transfer — Routine's reads are 1–5 ms against local memory with no
+  quota at all, so a ring that re-reads every half minute costs nothing worth
+  counting. Keep the ticking itself local arithmetic on one fetched timestamp,
+  and poll slowly because waking the shell has a cost even when the call does
+  not — not because the API will object.
 - **Bound at the boundary, not at the sink.** Clamp on the way out of the helper
   so a stale cache is bounded on read too.
 - **A capture must never be lost.** A plan that fails validation degrades to a
