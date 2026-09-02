@@ -8,9 +8,11 @@
 mod journal;
 mod mcp;
 mod md;
+mod render;
 
 use clap::{Args, Parser, Subcommand};
 use md::Checkbox;
+use render::Format;
 use serde_json::{json, Value};
 use std::io::{IsTerminal, Read};
 use time::{Date, OffsetDateTime};
@@ -20,6 +22,40 @@ use time::{Date, OffsetDateTime};
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    #[command(flatten)]
+    format: FormatArgs,
+}
+
+/// How to say it. Pretty when a person is watching, plain when piped, and
+/// --json when the reader is a program. `--md` exists so output composes:
+/// `rtn today --md` is valid input to `rtn log`.
+#[derive(Args, Default)]
+#[group(multiple = false)]
+struct FormatArgs {
+    /// Rendered for a terminal (the default when stdout is one)
+    #[arg(long, global = true)]
+    pretty: bool,
+    /// Markdown, as written
+    #[arg(long, global = true)]
+    md: bool,
+    /// Plain text, markers stripped
+    #[arg(long, global = true)]
+    txt: bool,
+    /// JSON, for programs
+    #[arg(long, global = true)]
+    json: bool,
+}
+
+impl FormatArgs {
+    fn resolve(&self) -> Format {
+        match (self.pretty, self.md, self.txt, self.json) {
+            (true, _, _, _) => Format::Pretty,
+            (_, true, _, _) => Format::Md,
+            (_, _, true, _) => Format::Txt,
+            (_, _, _, true) => Format::Json,
+            _ => Format::default_for_stdout(),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -34,16 +70,10 @@ enum Command {
     ///   rtn log --task pick up the milk
     ///   cat notes.md | rtn log
     Log(Log),
-    /// What today holds: the next event, and the tasks in play
-    Today {
-        #[arg(long)]
-        json: bool,
-    },
+    /// What today holds: its events, and the tasks in play
+    Today,
     /// The next event, and how long there is before it
-    Next {
-        #[arg(long)]
-        json: bool,
-    },
+    Next,
     /// Check the connection and say what is wrong when there is something wrong
     Doctor,
 }
@@ -65,8 +95,6 @@ struct Log {
     /// Show what would be written, and write nothing
     #[arg(long)]
     dry_run: bool,
-    #[arg(long)]
-    json: bool,
 }
 
 fn main() {
@@ -88,15 +116,17 @@ fn parse_date(s: &str) -> Result<Date, String> {
 }
 
 fn run() -> Result<(), String> {
-    match Cli::parse().command {
-        Command::Log(args) => log(args),
-        Command::Today { json } => today_cmd(json),
-        Command::Next { json } => next_cmd(json),
+    let cli = Cli::parse();
+    let format = cli.format.resolve();
+    match cli.command {
+        Command::Log(args) => log(args, format),
+        Command::Today => today_cmd(format),
+        Command::Next => next_cmd(format),
         Command::Doctor => doctor(),
     }
 }
 
-fn log(args: Log) -> Result<(), String> {
+fn log(args: Log, format: Format) -> Result<(), String> {
     let mut text = args.text.join(" ");
     if text.is_empty() {
         if std::io::stdin().is_terminal() {
@@ -124,19 +154,19 @@ fn log(args: Log) -> Result<(), String> {
     };
 
     if args.dry_run {
-        if args.json {
-            let doc: Vec<Value> = blocks.iter().map(|b| b.to_json(None)).collect();
-            println!("{}", serde_json::to_string_pretty(&doc).unwrap());
-        } else {
-            println!("{} — would write {} block(s):", journal::title_for(day), blocks.len());
-            for b in &blocks {
-                let j = b.to_json(None);
-                let kind = j["type"].as_str().unwrap_or("?");
-                let content = j["content"].as_str().unwrap_or("");
-                let head = content.lines().next().unwrap_or("");
-                println!("  {kind:<10} {}", truncate(head, 66));
-            }
+        let doc: Vec<Value> = blocks.iter().map(|b| b.to_json(None)).collect();
+        let mut out = format!(
+            "# {}\n\nWould write {} block(s).\n\n",
+            journal::title_for(day),
+            blocks.len()
+        );
+        for b in &blocks {
+            let j = b.to_json(None);
+            let kind = j["type"].as_str().unwrap_or("?");
+            let head = j["content"].as_str().unwrap_or("").lines().next().unwrap_or("");
+            out += &format!("- `{kind}` {}\n", truncate(head, 66));
         }
+        render::emit(&out, &json!({ "date": day.to_string(), "blocks": doc }), format);
         return Ok(());
     }
 
@@ -144,26 +174,23 @@ fn log(args: Log) -> Result<(), String> {
     let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
     let done = journal::append(&client, &jrn, day, &blocks).map_err(|e| e.to_string())?;
 
-    if args.json {
-        println!(
-            "{}",
-            json!({
-                "date": day.to_string(),
-                "blocks": done.written,
-                "tasks": done.tasks,
-                "created_day": done.created_day,
-            })
-        );
-    } else {
-        let mut line = format!("{} — {} block(s)", journal::title_for(day), done.written);
-        if !done.tasks.is_empty() {
-            line += &format!(", {} task(s)", done.tasks.len());
-        }
-        if done.created_day {
-            line += " (day created)";
-        }
-        println!("{line}");
+    let mut line = format!("**{}** — {} block(s)", journal::title_for(day), done.written);
+    if !done.tasks.is_empty() {
+        line += &format!(", {} task(s)", done.tasks.len());
     }
+    if done.created_day {
+        line += " *(day created)*";
+    }
+    render::emit(
+        &line,
+        &json!({
+            "date": day.to_string(),
+            "blocks": done.written,
+            "tasks": done.tasks,
+            "created_day": done.created_day,
+        }),
+        format,
+    );
     Ok(())
 }
 
@@ -174,7 +201,7 @@ fn truncate(s: &str, n: usize) -> String {
     s.chars().take(n.saturating_sub(1)).collect::<String>() + "…"
 }
 
-fn today_cmd(as_json: bool) -> Result<(), String> {
+fn today_cmd(format: Format) -> Result<(), String> {
     let client = mcp::Client::connect().map_err(|e| e.to_string())?;
     let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
     let day = today();
@@ -183,26 +210,31 @@ fn today_cmd(as_json: bool) -> Result<(), String> {
     let tasks = client
         .call("tasks_listTodaysTasks", json!({ "workspace": jrn.workspace, "limit": 50 }))
         .map_err(|e| e.to_string())?;
+    let open = tasks.pointer("/todo/items").and_then(Value::as_array).cloned().unwrap_or_default();
 
-    if as_json {
-        println!("{}", json!({ "date": day.to_string(), "events": events, "tasks": tasks }));
-        return Ok(());
-    }
-
-    println!("{}", journal::title_for(day));
+    let mut out = format!("# {}\n\n", journal::title_for(day));
+    out += "## Events\n\n";
     if events.is_empty() {
-        println!("  no events");
+        out += "*nothing on the calendar*\n";
     }
     for e in &events {
         let start = e.pointer("/time/start_time").and_then(Value::as_str).unwrap_or("");
-        let title = e.get("title").and_then(Value::as_str).unwrap_or("");
-        println!("  {}  {}", &start.get(11..16).unwrap_or("     "), truncate(collapse(title).trim(), 60));
+        let title = collapse(e.get("title").and_then(Value::as_str).unwrap_or(""));
+        out += &format!("- **{}** {}\n", start.get(11..16).unwrap_or("--:--"), truncate(&title, 66));
     }
-    let open = tasks.pointer("/todo/items").and_then(Value::as_array).cloned().unwrap_or_default();
-    println!("\n  {} task(s) scheduled today", open.len());
+    out += "\n## Tasks\n\n";
+    if open.is_empty() {
+        out += "*nothing scheduled for today*\n";
+    }
     for t in &open {
-        println!("  [ ] {}", truncate(collapse(t["title"].as_str().unwrap_or("")).trim(), 66));
+        out += &format!("- [ ] {}\n", truncate(&collapse(t["title"].as_str().unwrap_or("")), 66));
     }
+
+    render::emit(
+        &out,
+        &json!({ "date": day.to_string(), "events": events, "tasks": tasks }),
+        format,
+    );
     Ok(())
 }
 
@@ -231,7 +263,7 @@ fn sorted_events(client: &mcp::Client, day: Date) -> Result<Vec<Value>, String> 
     Ok(items)
 }
 
-fn next_cmd(as_json: bool) -> Result<(), String> {
+fn next_cmd(format: Format) -> Result<(), String> {
     let client = mcp::Client::connect().map_err(|e| e.to_string())?;
     let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
     let events = sorted_events(&client, now.date())?;
@@ -245,25 +277,41 @@ fn next_cmd(as_json: bool) -> Result<(), String> {
         e.pointer("/time/start_time").and_then(Value::as_str).unwrap_or("") > stamp.as_str()
     });
 
-    match next {
-        None => {
-            if as_json {
-                println!("{}", json!({ "next": Value::Null }));
-            } else {
-                println!("nothing else today");
-            }
-        }
+    let (out, payload) = match next {
+        None => ("*nothing else today*".to_owned(), json!({ "next": Value::Null })),
         Some(e) => {
             let start = e.pointer("/time/start_time").and_then(Value::as_str).unwrap_or("");
             let title = collapse(e.get("title").and_then(Value::as_str).unwrap_or(""));
-            if as_json {
-                println!("{}", json!({ "next": { "title": title, "start": start } }));
-            } else {
-                println!("{}  {}", start.get(11..16).unwrap_or(""), title.trim());
-            }
+            let mins = minutes_until(&stamp, start);
+            let away = mins.map(human_gap).unwrap_or_default();
+            (
+                format!("**{}** {}{}", start.get(11..16).unwrap_or(""), title.trim(), away),
+                json!({ "next": { "title": title.trim(), "start": start, "minutes": mins } }),
+            )
         }
-    }
+    };
+    render::emit(&out, &payload, format);
     Ok(())
+}
+
+/// Minutes between two `YYYY-MM-DDThh:mm:ss` stamps, by the clock face. Both
+/// come from the same day and the same offset, so the arithmetic stays local.
+fn minutes_until(now: &str, then: &str) -> Option<i64> {
+    let mins = |s: &str| -> Option<i64> {
+        let h: i64 = s.get(11..13)?.parse().ok()?;
+        let m: i64 = s.get(14..16)?.parse().ok()?;
+        Some(h * 60 + m)
+    };
+    Some(mins(then)? - mins(now)?)
+}
+
+fn human_gap(mins: i64) -> String {
+    match mins {
+        m if m < 1 => "  *now*".to_owned(),
+        m if m < 60 => format!("  *in {m} min*"),
+        m if m % 60 == 0 => format!("  *in {} hr*", m / 60),
+        m => format!("  *in {} hr {} min*", m / 60, m % 60),
+    }
 }
 
 fn doctor() -> Result<(), String> {

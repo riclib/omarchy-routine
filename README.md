@@ -26,8 +26,23 @@ rtn next             # the next event
 rtn doctor           # is any of this going to work, and if not why not
 ```
 
-`--json` on any read makes it machine-readable. `--dry-run` on `log` shows the
-blocks it would write without writing them.
+Output comes in four shapes, chosen by a global flag:
+
+| | |
+| --- | --- |
+| `--pretty` | rendered for a terminal — the default when stdout is one |
+| `--md` | markdown as written — the default when it is not a terminal is `--txt` |
+| `--txt` | plain prose, markers stripped |
+| `--json` | fields, for programs |
+
+Every human-facing command builds markdown and the first three are renderings
+of it, which means output composes:
+
+```bash
+rtn --md today | rtn log     # the day, logged back as blocks
+```
+
+`--dry-run` on `log` shows the blocks it would write without writing them.
 
 Input to `log` is read as markdown and becomes the blocks it looks like:
 headings, bullets, quotes, checkboxes, rules. A fenced code block stays **one**
