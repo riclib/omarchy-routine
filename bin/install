@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Build rtn, put it on PATH, and deploy the plugin — in that order, always.
+#
+# It exists because doing them separately went wrong twice in one afternoon:
+# `rtn task` was added, tested from target/release, and never installed, so the
+# overlay called a subcommand the binary on PATH did not have and the checkbox
+# did nothing. Then a fix was proved by `cargo test` — which builds its own
+# binary — while the real one stayed stale.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+BIN="${HOME}/.local/bin/rtn"
+PLUGIN="${HOME}/.config/omarchy/plugins/riclib.routine"
+
+cargo build --release
+cargo test --release --quiet
+install -Dm755 target/release/rtn "$BIN"
+
+rm -rf "$PLUGIN"
+cp -a plugin "$PLUGIN"
+
+# QML components are cached by URL, and a newly added overlay does not
+# hot-reload until the shell has loaded it once. A stale cache reports
+# `File name case mismatch` and errors on lines that no longer exist.
+if [[ "${1:-}" != "--no-restart" ]]; then
+  omarchy restart shell >/dev/null 2>&1 || true
+fi
+
+printf '%s  %s\n' "$("$BIN" --version)" "$BIN"
+"$BIN" doctor

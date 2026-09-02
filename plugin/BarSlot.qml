@@ -72,6 +72,8 @@ BarWidget {
 
   function refresh() {
     if (dash.running) return
+    // A one-shot Process needs the reset, or the second run is a no-op.
+    dash.running = false
     dash.running = true
   }
 
@@ -132,8 +134,11 @@ BarWidget {
       if (pressedButton === Qt.MiddleButton) {
         // Only a link rtn matched against its host allowlist ever gets here,
         // and it is passed as one argument rather than through a shell.
-        if (root.cache.next && root.cache.next.join !== "")
-          joinProcess.exec(["xdg-open", root.cache.next.join])
+        if (root.cache.next && root.cache.next.join !== "") {
+          joinProcess.command = ["xdg-open", root.cache.next.join]
+          joinProcess.running = false
+          joinProcess.running = true
+        }
       } else if (pressedButton === Qt.RightButton) {
         root.refresh()
       } else {

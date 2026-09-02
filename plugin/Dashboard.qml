@@ -67,6 +67,7 @@ Item {
   function refresh() {
     if (dash.running) return
     root.nowMs = Date.now()
+    dash.running = false
     dash.running = true
   }
 
@@ -87,7 +88,20 @@ Item {
       waitForEnd: true
       onStreamFinished: {
         var parsed = Model.parseDashboard(text)
-        if (parsed.ok) root.pending = ({})     // the reply is now the truth
+        if (parsed.ok) {
+          // Drop only the optimistic ticks the server has caught up with.
+          // A journal task's `done` comes from the note's checkbox, which
+          // trails the task by several seconds through the app's own sync,
+          // so clearing them all would flip a box back that is merely not
+          // synced yet — and it would do it while you watched.
+          var unconfirmed = ({})
+          for (var i = 0; i < parsed.tasks.length; i++) {
+            var t = parsed.tasks[i]
+            if (root.pending[t.id] !== undefined && root.pending[t.id] !== t.done)
+              unconfirmed[t.id] = root.pending[t.id]
+          }
+          root.pending = unconfirmed
+        }
         root.cache = parsed
       }
     }
@@ -100,7 +114,39 @@ Item {
     }
   }
 
-  Process { id: actionProc }
+  // One process, several clicks. Assigning `command` while it is running loses
+  // the new one, and ticking three boxes quickly is an ordinary thing to do —
+  // so they queue and drain rather than racing.
+  property var queue: []
+
+  Process {
+    id: actionProc
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var message = String(text || "").trim()
+        if (message !== "") root.flash = message.split("\n")[0]
+      }
+    }
+    onRunningChanged: if (!running) root.drain()
+  }
+
+  function enqueue(command) {
+    var pendingCommands = root.queue.slice()
+    pendingCommands.push(command)
+    root.queue = pendingCommands
+    root.drain()
+  }
+
+  function drain() {
+    if (actionProc.running || root.queue.length === 0) return
+    var rest = root.queue.slice()
+    var next = rest.shift()
+    root.queue = rest
+    actionProc.command = next
+    actionProc.running = true
+  }
 
   Process {
     id: logProc
@@ -132,6 +178,7 @@ Item {
     logProc.command = asTask
       ? [root.rtnBin, "log", "--task", body]
       : [root.rtnBin, "log", body]
+    logProc.running = false
     logProc.running = true
   }
 
@@ -141,12 +188,12 @@ Item {
     var updated = root.pending
     updated[task.id] = next
     root.pending = updated                      // reassign so bindings notice
-    actionProc.exec([root.rtnBin, "task", next ? "done" : "open", task.id])
+    root.enqueue([root.rtnBin, "task", next ? "done" : "open", task.id])
   }
 
   function join() {
     if (cache.next && cache.next.join !== "")
-      actionProc.exec(["xdg-open", cache.next.join])
+      root.enqueue(["xdg-open", cache.next.join])
   }
 
   Timer {

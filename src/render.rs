@@ -88,7 +88,14 @@ fn strip_inline(line: &str) -> String {
     let mut i = 0;
     while i < chars.len() {
         match chars[i] {
-            '*' | '`' | '_' => {
+            '*' | '`' => {
+                i += 1;
+            }
+            // Underscore is emphasis only where it touches whitespace or an
+            // edge. Inside a word it is part of the word -- an id, a path, a
+            // column name -- and taking it out quietly corrupts the very thing
+            // being reported back. `daily_notes__example` keeps all three.
+            '_' if edge_underscore(&chars, i) => {
                 i += 1;
             }
             '[' => {
@@ -111,6 +118,13 @@ fn strip_inline(line: &str) -> String {
         }
     }
     out
+}
+
+/// True when an underscore sits against whitespace or the end of the line, the
+/// only place markdown treats one as emphasis.
+fn edge_underscore(chars: &[char], at: usize) -> bool {
+    let open = |c: Option<&char>| c.is_none_or(|c| c.is_whitespace());
+    open(chars.get(at.wrapping_sub(1)).filter(|_| at > 0)) || open(chars.get(at + 1))
 }
 
 /// For a `[` at `open`, the index of its `]` and the index just past `(…)`.
@@ -139,6 +153,15 @@ mod tests {
             strip_inline("see [chat](https://example.com/x) for it"),
             "see chat for it"
         );
+    }
+
+    #[test]
+    fn an_underscore_inside_a_word_is_not_emphasis() {
+        // An id is the thing most likely to be reported back, and the thing
+        // most damaged by losing a character out of the middle of it.
+        assert_eq!(strip_inline("task:b0bvpSXg0S_DHAvVxhu2W"), "task:b0bvpSXg0S_DHAvVxhu2W");
+        assert_eq!(strip_inline("table:daily_notes__example"), "table:daily_notes__example");
+        assert_eq!(strip_inline("see _that_ file"), "see that file");
     }
 
     #[test]
