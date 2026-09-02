@@ -142,10 +142,17 @@ The nine block types you can actually author: `paragraph`, `heading` (content,
 level, retracted), `bullet` (list_type, depth), `check` (checked, depth), `todo`
 (checked, content, task), `blockquote`, `code` (language), `divider`, `embed`.
 
-**Markdown is not parsed.** Block content is a flat string; `**bold**` and
-`[text](url)` are stored as literal characters. The `/daily` house style (bold
-the claim, backtick the commands, link the chat) does not survive a port to
-Routine as-is.
+**Markdown is the storage format.** Block content round-trips as literal
+characters over the API — `**bold**` comes back as `**bold**` — but the app
+parses it at display time. Verified by eye on an imported note: bold renders,
+`[text](url)` becomes a link, backticks become code chips, `mailto:` resolves.
+So author markdown in `content` and do not try to pre-render it. The `/daily`
+house style — bold the claim, backtick anything typed, link the chat — ports
+over unchanged.
+
+The corollary is a security one: a block's content is markdown, and it arrives
+from the server. Anything rendering a note in QML is rendering untrusted
+markup, which is exactly what `textFormat: Text.PlainText` exists for.
 
 **A day with no entry has no row.** Searching the journal table for a date with
 nothing in it returns `[]`. The first capture of the morning has to create the
