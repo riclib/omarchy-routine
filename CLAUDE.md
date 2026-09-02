@@ -76,6 +76,19 @@ list tools as an index, never as a payload.
 **`scheduled` is a bare string**: `"2026-09-02"` for a day, `YYYY-WW` for a week
 batch ("Week 36" in the app). It is absent, not null, when unset.
 
+**Planning is one-way — a schedule cannot be removed over MCP.** `updateTask`
+with `scheduled: null` answers success and changes nothing, because `null` is
+the schema's "leave alone" default, and there is no sentinel for empty:
+`{"date":""}` and `{"week":""}` fail to parse, `"unplanned"` and `{}` fail to
+match `scheduled_input`. The app can unplan a task; the plugin never will be
+able to. Do not design an affordance that needs it.
+
+Corollary for capture: **create tasks unplanned and leave them there.** A task
+created with a journal `parent` and no `scheduled` comes back with no
+`scheduled` key, and the app still shows it under Unplanned with a chip naming
+the day it was captured — the parent already carries that. Planning it as well
+puts it in Wednesday for no gain, and cannot be undone from here.
+
 ## `listTodaysTasks` is not what feeds the app's Today
 
 The single most surprising finding, and it will bite any dashboard built the

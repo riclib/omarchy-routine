@@ -15,6 +15,12 @@ wrong, and expensive when you do:
     the Electron client syncing the same document, with the binding going to
     whichever wins.
 
+Imported checkboxes are left unplanned -- the journal parent already records
+which day they were captured on, and the app shows that. Note that a reused
+task keeps any schedule it picked up since, and MCP offers no way to remove
+one: `updateTask` treats a null `scheduled` as "leave alone" and rejects every
+other spelling of empty.
+
 Re-running is safe: a task already sitting under today's row with the same
 title is reused rather than created again.
 
@@ -128,7 +134,12 @@ def task_for(title, row):
         if got.get("completed"):
             continue
         if (got.get("parent") or {}).get("id") == row:
-            print("  reuse %s  %s" % (hit["id"]["id"], title[:52]))
+            # An import plans nothing. A reused task keeps whatever schedule it
+            # already had, and MCP cannot take one off again -- say so rather
+            # than leaving it to be noticed in the app.
+            when = got.get("scheduled")
+            print("  reuse %s  %s%s" % (hit["id"]["id"], title[:52],
+                                        "  [already planned %s]" % when if when else ""))
             return hit["id"]["id"]
     made = call("tasks_createTask", {"workspace": WORKSPACE, "title": title,
                                      "parent": {"kind": "object", "id": row}})
