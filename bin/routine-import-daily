@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Copy a markdown daily note into today's Routine journal entry.
+
+A reference implementation of the two rules in CLAUDE.md that are easy to get
+wrong, and expensive when you do:
+
+  * every block already in the note is echoed back by `existing` reference, so
+    nothing is re-serialised and block types the write schema cannot model
+    survive untouched;
+
+  * a checkbox is created as a task first, and only then authored as a `todo`
+    block carrying that task's id. `createTask(parent=<journal row>)` does not
+    insert a block by itself -- the relationship is one-way -- and authoring a
+    `todo` block with a null task mints two tasks, one server-side and one from
+    the Electron client syncing the same document, with the binding going to
+    whichever wins.
+
+Re-running is safe: a task already sitting under today's row with the same
+title is reused rather than created again.
+
+Usage: routine-import-daily <note.md> [--dry-run]
+"""
+
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+from datetime import date
+
+MCP_URL = "http://127.0.0.1:8765/mcp"
+AUTH = os.path.expanduser("~/.config/Routine/mcp-auth.json")
+WORKSPACE = "workspace:EXAMPLEWORKSPACE00000"
+JOURNAL = "table:daily_notes__example"
+
+MAX_BLOCKS = 500          # a note we will not rewrite past
+MAX_CONTENT = 4000        # per-block clamp, at the boundary
+
+
+def token():
+    with open(AUTH, encoding="utf-8") as fh:
+        return json.load(fh)["value"]
+
+
+def call(name, arguments, _tok=[]):
+    """One MCP tool call. Handles both response shapes; see CLAUDE.md."""
+    if not _tok:
+        _tok.append(token())
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": name, "arguments": arguments}}).encode()
+    req = urllib.request.Request(MCP_URL, data=body, headers={
+        "Authorization": "Bearer " + _tok[0],
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream"})
+    try:
+        raw = urllib.request.urlopen(req, timeout=20).read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            sys.exit("401 -- the token in %s is not the one the app is using" % AUTH)
+        raise
+    except urllib.error.URLError:
+        sys.exit("no answer on %s -- is Routine running with its MCP server on?" % MCP_URL)
+
+    frames = [ln[6:] for ln in raw.splitlines() if ln.startswith("data: ")]
+    if not frames:
+        sys.exit("no SSE frame in reply")
+    msg = json.loads(frames[0])
+    if "error" in msg:
+        sys.exit("MCP error: " + json.dumps(msg["error"])[:400])
+    result = msg["result"]
+    if result.get("isError"):
+        sys.exit("tool error: " + json.dumps(result)[:400])
+    if "structuredContent" in result:
+        return result["structuredContent"]
+    # search_search and tables_searchTableRows answer with a text block only
+    return json.loads(result["content"][0]["text"])
+
+
+def unwrap(node):
+    """Routine returns values as {"type":…,"value":…}. Strip that envelope."""
+    if isinstance(node, dict) and "value" in node and "type" in node:
+        return unwrap(node["value"])
+    if isinstance(node, dict):
+        return {k: unwrap(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [unwrap(v) for v in node]
+    return node
+
+
+def today_row():
+    """The journal row for today, created if the day has no entry yet."""
+    title = "%s %d, %d" % (date.today().strftime("%B"), date.today().day,
+                           date.today().year)
+    rows = call("tables_searchTableRows", {
+        "workspace": WORKSPACE, "table": JOURNAL,
+        "filter": {"match": "all",
+                   "conditions": [{"field": "Title", "op": "eq", "values": [title]}]}})
+    if rows:
+        row_id = rows[0][0]                      # "row:<nanoid>"
+        return "object:%s:%s:%s" % (WORKSPACE.split(":", 1)[1],
+                                    JOURNAL.split(":", 1)[1],
+                                    row_id.split(":", 1)[1])
+    print("no journal entry for %s yet -- creating it" % title)
+    made = call("tables_write_addTableRow", {
+        "workspace": WORKSPACE, "table": JOURNAL,
+        "fields": [{"name": "Title", "value": title}]})
+    return made if isinstance(made, str) else made.get("id")
+
+
+def blocks_of(row):
+    """Ordered (id, type, bound-task) for the note, bounded."""
+    doc = unwrap(call("tables_getObject", {"object": row}))
+    raw = doc["data"]["Notes"]["blocks"]
+    if len(raw) > MAX_BLOCKS:
+        sys.exit("note has %d blocks, over the %d we will rewrite" % (len(raw), MAX_BLOCKS))
+    return [(b["id"], b["type"], b.get("task"), b.get("content", "")) for b in raw]
+
+
+def task_for(title, row):
+    """The task for this checkbox: an open one already under today's row, or a
+    new one. createTask answers {"taskId": …} and inserts no block of its own."""
+    for hit in call("search_search", {"query": title, "kind": {"type": "task"},
+                                      "limit": 10}):
+        if hit["title"] != title:
+            continue
+        got = call("tasks_getTask", {"task": hit["id"]["id"]})
+        if got.get("completed"):
+            continue
+        if (got.get("parent") or {}).get("id") == row:
+            print("  reuse %s  %s" % (hit["id"]["id"], title[:52]))
+            return hit["id"]["id"]
+    made = call("tasks_createTask", {"workspace": WORKSPACE, "title": title,
+                                     "parent": {"kind": "object", "id": row}})
+    print("  new   %s  %s" % (made["taskId"], title[:52]))
+    return made["taskId"]
+
+
+def parse(md):
+    """Markdown -> a plan of ('todo', text) and ('block', {…}) entries."""
+    plan = []
+    for raw in md.split("\n"):
+        line = raw.strip()
+        if not line or line == "---":
+            continue
+        if line.startswith(("type:", "title:", "date:")) and not plan:
+            continue                                   # YAML frontmatter
+        text = line
+        if line.startswith("## "):
+            plan.append(("block", {"type": "heading", "content": text[3:][:MAX_CONTENT],
+                                   "level": 2, "retracted": False}))
+        elif line.startswith("# "):
+            plan.append(("block", {"type": "heading", "content": text[2:][:MAX_CONTENT],
+                                   "level": 1, "retracted": False}))
+        elif re.match(r"^- \[[ xX]\] ", line):
+            plan.append(("todo", line[6:][:MAX_CONTENT]))
+        elif line.startswith("- "):
+            plan.append(("block", {"type": "bullet", "list_type": "unordered",
+                                   "content": text[2:][:MAX_CONTENT], "depth": 0}))
+        else:
+            plan.append(("block", {"type": "paragraph", "content": text[:MAX_CONTENT]}))
+    return plan
+
+
+def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    dry = "--dry-run" in sys.argv
+    if len(args) != 1:
+        sys.exit(__doc__.strip().splitlines()[-1])
+
+    with open(args[0], encoding="utf-8") as fh:
+        plan = parse(fh.read())
+    todos = [t for kind, t in plan if kind == "todo"]
+    print("to import: %d blocks, of which %d are tasks"
+          % (len(plan), len(todos)))
+    if dry:
+        for kind, item in plan:
+            print("  %-5s %s" % (kind, item if kind == "todo" else item.get("content", "")[:70]))
+        return
+
+    row = today_row()
+    existing = blocks_of(row)
+    print("journal row %s -- %d blocks already there" % (row.split(":")[-1], len(existing)))
+
+    # 1. a task per checkbox, reusing one already under today's row.
+    made = []
+    for text in todos:
+        made.append(task_for(text, row))
+
+    # 2. one write. Everything already in the note goes back by reference; our
+    #    todo blocks carry an explicit task id so nothing gets minted twice.
+    # Routine keeps an empty paragraph last; splice in front of it, not after.
+    ids = [bid for bid, _, _, _ in existing]
+    trailing = []
+    if existing and existing[-1][1] == "paragraph" and not existing[-1][3].strip():
+        trailing = [ids.pop()]
+
+    doc = [{"type": "existing", "id": bid} for bid in ids]
+    it = iter(made)
+    for kind, item in plan:
+        if kind == "todo":
+            tid = next(it)
+            doc.append({"type": "todo", "checked": False, "content": item, "task": tid})
+        else:
+            doc.append(item)
+    doc += [{"type": "existing", "id": bid} for bid in trailing]
+
+    # the id list is the concurrency token, and it is read as late as possible
+    if [b for b, _, _, _ in blocks_of(row)] != [b for b, _, _, _ in existing]:
+        sys.exit("ABORT: the note changed while we were preparing the write")
+
+    call("tables_write_updateNotesColumn",
+         {"object": row, "columnName": "Notes", "content": {"blocks": doc}})
+    print("written: %d blocks (%d by reference, %d authored)"
+          % (len(doc), len(ids) + len(trailing), len(doc) - len(ids) - len(trailing)))
+
+
+if __name__ == "__main__":
+    main()

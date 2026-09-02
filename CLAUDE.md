@@ -145,22 +145,44 @@ string like `"September 2, 2026"`, which is a fragile key; treat a miss as
 last. Splice in front of it rather than after, or content lands below a blank
 line.
 
-### Never write a `todo` block with `task: null`
+### A checkbox takes two calls, in this order
 
-Measured 2026-09-02, twice in one write. The MCP mints a task for the block
-server-side; the Electron client, syncing the same document, sees a todo block
-and mints its own. **Two tasks per block**, one of which wins the binding
-arbitrarily — in the same import, one pair bound the note's copy and the other
-bound the orphan. Both are parented to the journal row, so both show up in the
-app's Unplanned list and neither shows up over MCP.
+**Never write a `todo` block with `task: null`.** Measured 2026-09-02, twice in
+one write. The MCP mints a task for the block server-side; the Electron client,
+syncing the same document, sees a todo block and mints its own. **Two tasks per
+block**, one of which wins the binding arbitrarily — in the same import, one
+pair bound the note's copy and the other bound the orphan. Both are parented to
+the journal row, so both show in the app's Unplanned list and neither shows up
+over MCP. The failure is silent and permanent: the calendar block you drag out
+of the orphan is not the task your checkbox completes.
 
-The failure is silent and permanent: the calendar block you drag out of the
-orphan is not the task your checkbox completes.
+**And `createTask(parent = <journal row>)` does not insert a block.** The
+relationship is one-way — a todo block mints a task, a parented task does not
+mint a block. Three tasks created against today's row left the note untouched.
+So the block has to be authored; there is no atomic path that does both.
 
-**Create tasks with `tasks_createTask(parent = {kind:"object", id:<journal
-row>})` and let Routine insert the block.** That path is atomic. Use
-`updateNotesColumn` only for blocks that are not tasks — and to *reorder*, which
-is safe because reordering only ever names ids.
+The order that works, verified clean (exactly one task per checkbox, no
+double-mint):
+
+1. `tasks_createTask(workspace, title, parent={kind:"object", id:<row>})`
+   → answers `{"taskId": "task:…"}`, **not** `id`
+2. author the block with that id: `{"type":"todo", "checked":false,
+   "content":…, "task":"task:…"}`
+
+An explicit task id is what stops the client minting a second one. Make the
+import idempotent by reusing an open task already under today's row with the
+same title, or a re-run duplicates every checkbox.
+
+`tasks_deleteTask` answers `null` on success.
+
+### Rewriting the note does not disturb its tasks
+
+Verified by allocating a task, rewriting the whole document with every block by
+`existing` reference, and reading back: `allocationIds` and `scheduled` both
+survived, block count unchanged. So reordering and appending are safe against
+tasks that are scheduled or blocked out on the calendar — which is what makes
+"create the tasks, then place them by reference" a usable pattern rather than a
+destructive one.
 
 ## Concurrency
 
