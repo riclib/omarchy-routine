@@ -84,7 +84,10 @@ def call(name, arguments, _tok=[]):
 
 
 def unwrap(node):
-    """Routine returns values as {"type":…,"value":…}. Strip that envelope."""
+    """Routine returns values as {"type":…,"value":…}. Strip that envelope.
+    An unset field is {"type":"null"} with no "value" at all."""
+    if isinstance(node, dict) and node.get("type") == "null":
+        return None
     if isinstance(node, dict) and "value" in node and "type" in node:
         return unwrap(node["value"])
     if isinstance(node, dict):
@@ -107,17 +110,20 @@ def today_row():
         return "object:%s:%s:%s" % (WORKSPACE.split(":", 1)[1],
                                     JOURNAL.split(":", 1)[1],
                                     row_id.split(":", 1)[1])
+    # A field value wants the same typed envelope reads come back in, and
+    # addTableRow answers with the full compound object id.
     print("no journal entry for %s yet -- creating it" % title)
     made = call("tables_write_addTableRow", {
         "workspace": WORKSPACE, "table": JOURNAL,
-        "fields": [{"name": "Title", "value": title}]})
-    return made if isinstance(made, str) else made.get("id")
+        "fields": [{"name": "Title", "value": {"type": "string", "value": title}}]})
+    return made["id"]
 
 
 def blocks_of(row):
-    """Ordered (id, type, bound-task) for the note, bounded."""
+    """Ordered (id, type, bound-task, content) for the note, bounded.
+    A row created moments ago has Notes unset, not an empty document."""
     doc = unwrap(call("tables_getObject", {"object": row}))
-    raw = doc["data"]["Notes"]["blocks"]
+    raw = (doc["data"].get("Notes") or {}).get("blocks") or []
     if len(raw) > MAX_BLOCKS:
         sys.exit("note has %d blocks, over the %d we will rewrite" % (len(raw), MAX_BLOCKS))
     return [(b["id"], b["type"], b.get("task"), b.get("content", "")) for b in raw]

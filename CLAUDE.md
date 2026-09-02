@@ -161,6 +161,30 @@ then `updateNotesColumn`. Row lookup is by `Title` matching a locale-formatted
 string like `"September 2, 2026"`, which is a fragile key; treat a miss as
 "needs creating" only after ruling out a formatting mismatch.
 
+Three things about that branch, each of which breaks it if missed. Verified by
+creating tomorrow's day ahead of time rather than finding out at 8am:
+
+- **A field value wants the typed envelope**, the same one reads come back in:
+  `{"name":"Title","value":{"type":"string","value":"September 3, 2026"}}`. A
+  bare string is rejected — *expected object, got "September 3, 2026"*. The
+  `schema: read_only` on the journal's columns is about altering the schema, not
+  the values; Title writes fine.
+- **`addTableRow` answers `{"id":"object:<ws>:<table>:<row>"}`** — the full
+  compound id, so there is nothing to reassemble.
+- **A brand-new row's `Notes` is `{"type":"null"}`**, not an empty document.
+  There is no `blocks` key to read, so anything walking the note has to treat an
+  unset Notes as an empty list. This is the one that would have thrown on the
+  first capture of every morning.
+
+Once written, the row is found by the ordinary Title lookup, so the second
+capture of the morning reuses it rather than making a second day.
+
+**Unverified:** whether Routine treats a row created this way as *the* journal
+entry for that date, or as an orphan it will not reconcile with the day the app
+creates when you open it. Capacities had exactly this failure — only
+`saveToDailyNote` could make the day, the REST append could not. Check a
+pre-created day in the app before trusting the branch.
+
 **Append before the trailing empty paragraph.** Routine keeps an empty paragraph
 last. Splice in front of it rather than after, or content lands below a blank
 line.
