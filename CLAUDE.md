@@ -375,14 +375,40 @@ monitor. Resolve the focused instance via `bar.findPanelWidget` rather than
 letting whichever registered first answer. Refreshes broadcast, because a
 refresh is not a place.
 
+## The shell's styling API, which is not guessable
+
+Invented names fail at runtime, not at load, so they show up as a widget that
+draws wrong rather than one that refuses. The real surface:
+
+| | |
+| --- | --- |
+| `Style.space(px)` | a pixel value times the theme's spacing scale — used with real numbers, e.g. `Style.space(560)` for a card |
+| `Style.spacing.{hairline,xxs,xs,sm,md,lg,xl}` | named gaps, for anything between elements |
+| `Style.font.{caption,bodySmall,body,subtitle,title,display}` | type sizes. There is **no** `Style.fontSize(n)` |
+| `Style.cornerRadius`, `Style.gapsOut` | mirror Hyprland's rounding and half its `gaps_out` |
+| `Color.urgent` | lives at the root, not under `Color.menu` |
+| `Color.menu.*` | the launcher's surface tokens — share them and a theme styles this too |
+
+`qs.Ui` exports its own `TextField`, so importing `QtQuick.Controls` alongside
+`qs.Ui` is both ambiguous and the wrong choice: the shell's field is themed.
+
 ## Gotchas that cost an afternoon elsewhere
 
 Carried over from `riclib.capacities` — all of these apply here too.
 
-- **A bar widget component is cached by URL.** Editing `BarSlot.qml` in place
-  does nothing, not even with `omarchy-shell shell rescanPlugins`. Only
-  `omarchy restart shell` picks it up. Overlays *do* hot-reload, which makes
-  this easy to misdiagnose.
+- **Components are cached by URL, and it is worse than the Capacities note
+  says.** Editing `BarSlot.qml` in place does nothing without `omarchy restart
+  shell` — but neither does a **newly added overlay**, nor any sub-component it
+  loads (`Ring.qml`, `TaskRow.qml`). Overlays hot-reload only once the shell has
+  successfully loaded them at least once.
+
+  A stale cache announces itself as **`File name case mismatch` at
+  `[-1:-1]`**, which reads like a filename problem and is not one. An hour went
+  into renaming the file, removing siblings and diffing manifests before
+  `omarchy restart shell` fixed it untouched. The same cache also reports errors
+  against lines that no longer exist — `Style.fontSize is not a function` kept
+  firing from a file with no such call in it. **When a QML error stops matching
+  the file you are reading, restart the shell before believing it.**
 - **`data` is `Item`'s default property.** `property var data` silently shadows
   the child-object list. Name it anything else.
 - **Naming a QML file after the type it extends breaks it** — the local

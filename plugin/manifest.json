@@ -5,10 +5,14 @@
   "version": "0.1.0",
   "author": "Ricardo Liberato",
   "license": "MIT",
-  "description": "How long until the next meeting, and what today is holding — from Routine, without opening it",
-  "kinds": ["bar-widget"],
+  "description": "How long until the next meeting, and what today is holding \u2014 from Routine, without opening it",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
   "keepLoaded": true,
   "entryPoints": {
+    "overlay": "Dashboard.qml",
     "barWidget": "BarSlot.qml"
   },
   "barWidget": {
@@ -28,7 +32,7 @@
         "type": "string",
         "label": "Path to rtn",
         "defaultValue": "rtn",
-        "description": "Left as a bare name it is resolved on PATH — which the graphical session does not always inherit the way a terminal does. If the widget says the binary is missing while a terminal finds it fine, put the absolute path here."
+        "description": "Left as a bare name it is resolved on PATH \u2014 which the graphical session does not always inherit the way a terminal does. If the widget says the binary is missing while a terminal finds it fine, put the absolute path here."
       },
       {
         "key": "refreshSeconds",
@@ -38,7 +42,7 @@
         "max": 900,
         "step": 15,
         "defaultValue": 60,
-        "description": "How often to ask Routine. A call is a local memory read costing about ten milliseconds, so this is cheap — but the countdown itself ticks locally between polls and does not need one."
+        "description": "How often to ask Routine. A call is a local memory read costing about ten milliseconds, so this is cheap \u2014 but the countdown itself ticks locally between polls and does not need one."
       },
       {
         "key": "urgentMinutes",

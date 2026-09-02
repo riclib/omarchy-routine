@@ -76,6 +76,8 @@ enum Command {
     Today,
     /// The next event, and how long there is before it
     Next,
+    /// Tick a task off, put it back, or drop it
+    Task(Task),
     /// Everything the bar widget needs, in one call
     ///
     /// Today's events with a join link for the next one, and the tasks in
@@ -92,6 +94,15 @@ enum Command {
         #[arg(long)]
         mcp_config: bool,
     },
+}
+
+#[derive(Args)]
+struct Task {
+    /// done | open | drop
+    #[arg(value_parser = ["done", "open", "drop"])]
+    action: String,
+    /// The task id, as `task:…` — from `rtn dashboard --json`
+    id: String,
 }
 
 #[derive(Args)]
@@ -138,6 +149,7 @@ fn run() -> Result<(), String> {
         Command::Log(args) => log(args, format),
         Command::Today => today_cmd(format),
         Command::Next => next_cmd(format),
+        Command::Task(args) => task_cmd(args, format),
         Command::Dashboard => {
             let client = mcp::Client::connect().map_err(|e| e.to_string())?;
             let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
@@ -223,6 +235,29 @@ fn log(args: Log, format: Format) -> Result<(), String> {
             "tasks": done.tasks,
             "created_day": done.created_day,
         }),
+        format,
+    );
+    Ok(())
+}
+
+/// `discarded` is a third state the app offers and the dashboard does not: a
+/// task that will not be worked on, as distinct from one still waiting.
+fn task_cmd(args: Task, format: Format) -> Result<(), String> {
+    let status = match args.action.as_str() {
+        "done" => "completed",
+        "open" => "todo",
+        _ => "discarded",
+    };
+    if !args.id.starts_with("task:") && !args.id.starts_with("object:") {
+        return Err(format!("{} is not a task id; they look like task:…", args.id));
+    }
+    let client = mcp::Client::connect().map_err(|e| e.to_string())?;
+    client
+        .call("tasks_updateTask", json!({ "task": args.id, "status": status }))
+        .map_err(|e| e.to_string())?;
+    render::emit(
+        &format!("**{}** — {}", args.id, status),
+        &json!({ "task": args.id, "status": status }),
         format,
     );
     Ok(())
