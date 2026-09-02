@@ -34,7 +34,18 @@ Item {
   width: implicitWidth
   height: implicitHeight
 
-  onFractionChanged: arc.requestPaint()
+  // The arc is painted from this rather than from `fraction`, so a jump —
+  // opening the overlay, or the next event changing — sweeps round instead of
+  // snapping. Between ticks the two are the same number.
+  property real labelOpacity: 1.0
+  property real shownFraction: 0
+  Behavior on shownFraction {
+    NumberAnimation { duration: 620; easing.type: Easing.OutCubic }
+  }
+  onFractionChanged: shownFraction = fraction
+  Component.onCompleted: shownFraction = fraction
+
+  onShownFractionChanged: arc.requestPaint()
   onAccentChanged: arc.requestPaint()
   onTrackChanged: arc.requestPaint()
 
@@ -58,10 +69,10 @@ Item {
       ctx.arc(cx, cy, radius, 0, Math.PI * 2)
       ctx.stroke()
 
-      if (ring.fraction > 0) {
+      if (ring.shownFraction > 0) {
         ctx.beginPath()
         ctx.strokeStyle = ring.accent
-        ctx.arc(cx, cy, radius, start, start + Math.PI * 2 * ring.fraction)
+        ctx.arc(cx, cy, radius, start, start + Math.PI * 2 * ring.shownFraction)
         ctx.stroke()
       }
     }
@@ -78,6 +89,14 @@ Item {
       color: ring.foreground
       font.pixelSize: Style.font.display
       font.weight: Font.DemiBold
+      // A minute ticking over should read as the same number changing, not as
+      // one label being swapped for another.
+      Behavior on text { SequentialAnimation {
+        NumberAnimation { target: ring; property: "labelOpacity"; to: 0.25; duration: 90 }
+        PropertyAction {}
+        NumberAnimation { target: ring; property: "labelOpacity"; to: 1.0; duration: 160 }
+      } }
+      opacity: ring.labelOpacity
     }
     Text {
       anchors.horizontalCenter: parent.horizontalCenter

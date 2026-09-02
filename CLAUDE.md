@@ -279,6 +279,24 @@ same title, or a re-run duplicates every checkbox.
 
 `tasks_deleteTask` answers `null` on success.
 
+### The task and its checkbox converge in about five seconds
+
+Traced both ways. `updateTask` changes the task at once and the note's `checked`
+follows roughly five seconds later, through the app's own sync — and it works in
+both directions with no bounce-back:
+
+```
+after done  +1s  task=True  block=False      after open  +1s  task=False block=True
+after done  +6s  task=True  block=True       after open  +6s  task=False block=False
+```
+
+Two consequences for anything with a checkbox in it. **A dashboard reads a
+journal task's done state from the block**, so it lags the task — tick
+optimistically or the row looks broken for five seconds. And **do not clear
+optimistic state wholesale on a refresh**: a poll landing inside that window
+reports the old value and flips the box back while the user watches. Drop only
+the ticks the server has caught up with.
+
 ### Rewriting the note does not disturb its tasks
 
 Verified by allocating a task, rewriting the whole document with every block by

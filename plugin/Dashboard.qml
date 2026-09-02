@@ -185,9 +185,14 @@ Item {
   function toggleTask(task) {
     if (task.id === "") return
     var next = !isDone(task)
-    var updated = root.pending
+    // A **copy**, not the same object mutated. Assigning the identical
+    // reference back is not a change as far as QML is concerned, so no
+    // binding re-evaluates and the tick goes to Routine without ever
+    // reaching the pixel you clicked.
+    var updated = ({})
+    for (var key in root.pending) updated[key] = root.pending[key]
     updated[task.id] = next
-    root.pending = updated                      // reassign so bindings notice
+    root.pending = updated
     root.enqueue([root.rtnBin, "task", next ? "done" : "open", task.id])
   }
 
