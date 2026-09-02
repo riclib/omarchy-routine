@@ -24,7 +24,13 @@ other spelling of empty.
 Re-running is safe: a task already sitting under today's row with the same
 title is reused rather than created again.
 
-Usage: routine-import-daily <note.md> [--dry-run]
+Backfilling old days is a different job from capturing today's, and takes
+--historical: a checkbox from three weeks ago becomes a `check` block, which
+renders as a ticked or unticked box but binds no task. Weeks of stale items
+have no business arriving in Unplanned, and MCP cannot take a schedule off one
+again if it picks one up.
+
+Usage: routine-import-daily <note.md> [--date=YYYY-MM-DD] [--historical] [--dry-run]
 """
 
 import json
@@ -97,10 +103,9 @@ def unwrap(node):
     return node
 
 
-def today_row():
-    """The journal row for today, created if the day has no entry yet."""
-    title = "%s %d, %d" % (date.today().strftime("%B"), date.today().day,
-                           date.today().year)
+def row_for(day):
+    """The journal row for a date, created if that day has no entry yet."""
+    title = "%s %d, %d" % (day.strftime("%B"), day.day, day.year)
     rows = call("tables_searchTableRows", {
         "workspace": WORKSPACE, "table": JOURNAL,
         "filter": {"match": "all",
@@ -153,8 +158,9 @@ def task_for(title, row):
     return made["taskId"]
 
 
-def parse(md):
-    """Markdown -> a plan of ('todo', text) and ('block', {…}) entries."""
+def parse(md, historical=False):
+    """Markdown -> a plan of ('todo', text) and ('block', {…}) entries.
+    Under --historical a checkbox is an inert `check` block instead."""
     plan = []
     for raw in md.split("\n"):
         line = raw.strip()
@@ -170,7 +176,12 @@ def parse(md):
             plan.append(("block", {"type": "heading", "content": text[2:][:MAX_CONTENT],
                                    "level": 1, "retracted": False}))
         elif re.match(r"^- \[[ xX]\] ", line):
-            plan.append(("todo", line[6:][:MAX_CONTENT]))
+            done = line[3] in "xX"
+            if historical:
+                plan.append(("block", {"type": "check", "checked": done,
+                                       "content": line[6:][:MAX_CONTENT], "depth": 0}))
+            else:
+                plan.append(("todo", line[6:][:MAX_CONTENT]))
         elif line.startswith("- "):
             plan.append(("block", {"type": "bullet", "list_type": "unordered",
                                    "content": text[2:][:MAX_CONTENT], "depth": 0}))
@@ -180,26 +191,34 @@ def parse(md):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    dry = "--dry-run" in sys.argv
+    argv = sys.argv[1:]
+    args = [a for a in argv if not a.startswith("--")]
+    dry = "--dry-run" in argv
+    historical = "--historical" in argv
+    day = date.today()
+    for a in argv:
+        if a.startswith("--date="):
+            day = date.fromisoformat(a.split("=", 1)[1])
     if len(args) != 1:
         sys.exit(__doc__.strip().splitlines()[-1])
 
     with open(args[0], encoding="utf-8") as fh:
-        plan = parse(fh.read())
+        plan = parse(fh.read(), historical)
     todos = [t for kind, t in plan if kind == "todo"]
-    print("to import: %d blocks, of which %d are tasks"
-          % (len(plan), len(todos)))
+    print("%s: %d blocks, %d of them tasks%s"
+          % (day.isoformat(), len(plan), len(todos),
+             "  [historical -- checkboxes bind no task]" if historical else ""))
     if dry:
         for kind, item in plan:
-            print("  %-5s %s" % (kind, item if kind == "todo" else item.get("content", "")[:70]))
+            print("  %-5s %s" % (kind, item if kind == "todo"
+                                 else "%s %s" % (item["type"][:5], item.get("content", "")[:64])))
         return
 
-    row = today_row()
+    row = row_for(day)
     existing = blocks_of(row)
-    print("journal row %s -- %d blocks already there" % (row.split(":")[-1], len(existing)))
+    print("  row %s, %d blocks already there" % (row.split(":")[-1], len(existing)))
 
-    # 1. a task per checkbox, reusing one already under today's row.
+    # 1. a task per checkbox, reusing one already under that day's row.
     made = []
     for text in todos:
         made.append(task_for(text, row))
