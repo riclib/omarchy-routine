@@ -179,11 +179,12 @@ creating tomorrow's day ahead of time rather than finding out at 8am:
 Once written, the row is found by the ordinary Title lookup, so the second
 capture of the morning reuses it rather than making a second day.
 
-**Unverified:** whether Routine treats a row created this way as *the* journal
-entry for that date, or as an orphan it will not reconcile with the day the app
-creates when you open it. Capacities had exactly this failure — only
-`saveToDailyNote` could make the day, the REST append could not. Check a
-pre-created day in the app before trusting the branch.
+And the row is a real journal day, not an orphan: a day created this way ahead
+of time opens in the app with its normal day header and the written content in
+place. Worth having checked — Capacities fails exactly here, where only
+`saveToDailyNote` can make the day and the REST append cannot, so a capture
+aimed at a day that does not exist yet has to queue. Routine needs no such
+outbox: **the plugin can always write, whatever day it is.**
 
 **Append before the trailing empty paragraph.** Routine keeps an empty paragraph
 last. Splice in front of it rather than after, or content lands below a blank
