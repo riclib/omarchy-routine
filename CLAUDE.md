@@ -79,6 +79,21 @@ return only a text block holding JSON:
 Any client must handle both or those two silently return nothing. Parse
 `structuredContent` when present, else `json.loads(result.content[0].text)`.
 
+**`tables_listTables` does not list everything.** The app's type picker shows
+fifteen object types; `listTables` returns fourteen, silently omitting
+`projects`. The table is entirely usable — `getTableSchema` and
+`searchTableRows` both answer on it — it is just absent from the enumeration.
+Find it the way anything else undocumented is found:
+
+```json
+search_search  {"query": "project", "kind": {"type": "table"}}
+→ table_ref:EXAMPLEWORKSPACE00000:EXAMPLETABLEID000000  "projects (Project)"
+```
+
+Note the id comes back as `table_ref:<workspace>:<nanoid>`; the table tools want
+`table:<nanoid>`. So do not build a type list from `listTables` and assume it is
+complete, and do not conclude an entity is unreachable because it is missing.
+
 ## What the data actually looks like
 
 **Events come back unsorted.** `listEventsForDateRange` returned Sep 2, Sep 5,
@@ -168,6 +183,20 @@ day's note.
 The nine block types you can actually author: `paragraph`, `heading` (content,
 level, retracted), `bullet` (list_type, depth), `check` (checked, depth), `todo`
 (checked, content, task), `blockquote`, `code` (language), `divider`, `embed`.
+
+**Blocks exist that are not on that list, and they are not hypothetical.** A
+project note here holds a `query` block — Routine has a query language
+embedded in documents:
+
+```
+tasks where 'Project'._routine.id = "row:EXAMPLEROWID00000000"
+index by 'Status' as _routine_source_database
+select (…)
+```
+
+`query` cannot be authored. A document rebuilt from parsed content would have
+destroyed it silently. This is what `existing` is for, and why the rule is echo
+by reference rather than round-trip the content.
 
 **Markdown is the storage format.** Block content round-trips as literal
 characters over the API — `**bold**` comes back as `**bold**` — but the app

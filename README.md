@@ -4,9 +4,39 @@ An Omarchy shell plugin for [Routine](https://routine.co) — the dashboard as a
 Quickshell overlay, a countdown to the next meeting in the bar, and capture
 straight into today's journal.
 
-**Status: nothing built yet.** The data layer underneath is mapped and measured;
-see `CLAUDE.md` for how Routine's MCP server actually behaves, including several
-findings that are not in its documentation.
+**Status: the CLI works, the widget does not exist yet.** See `CLAUDE.md` for
+how Routine's MCP server actually behaves, including several findings that are
+not in its documentation.
+
+## `rtn`
+
+One binary, for people and for programs. Everything that talks to Routine goes
+through it — the widget will shell out to it rather than speaking MCP itself,
+which is what keeps the token, the bounds and the retries in one place instead
+of in QML.
+
+```bash
+rtn log "just had a ball"              # a note in today's journal
+rtn log --task pick up the milk        # a task, bound to today's entry
+cat notes.md | rtn log                 # markdown, parsed into blocks
+rtn log --date=2026-08-09 --historical < old.md   # backfill, minting no tasks
+
+rtn today            # the day: events, and the tasks in play
+rtn next             # the next event
+rtn doctor           # is any of this going to work, and if not why not
+```
+
+`--json` on any read makes it machine-readable. `--dry-run` on `log` shows the
+blocks it would write without writing them.
+
+Input to `log` is read as markdown and becomes the blocks it looks like:
+headings, bullets, quotes, checkboxes, rules. A fenced code block stays **one**
+block however long it is, which is most of the reason the parser exists.
+
+```bash
+cargo build --release      # target/release/rtn
+cargo test                 # the parser, offline
+```
 
 ## Why
 
