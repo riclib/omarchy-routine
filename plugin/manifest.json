@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "id": "riclib.routine",
+  "name": "Routine",
+  "version": "0.1.0",
+  "author": "Ricardo Liberato",
+  "license": "MIT",
+  "description": "How long until the next meeting, and what today is holding — from Routine, without opening it",
+  "kinds": ["bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "barWidget": "BarSlot.qml"
+  },
+  "barWidget": {
+    "displayName": "Routine",
+    "description": "Counts down to the next event and opens today's agenda; needs the rtn CLI",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "rtnBin": "rtn",
+      "refreshSeconds": 60,
+      "urgentMinutes": 5
+    },
+    "schema": [
+      {
+        "key": "rtnBin",
+        "type": "string",
+        "label": "Path to rtn",
+        "defaultValue": "rtn",
+        "description": "Left as a bare name it is resolved on PATH — which the graphical session does not always inherit the way a terminal does. If the widget says the binary is missing while a terminal finds it fine, put the absolute path here."
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "integer",
+        "label": "Refresh every (seconds)",
+        "min": 15,
+        "max": 900,
+        "step": 15,
+        "defaultValue": 60,
+        "description": "How often to ask Routine. A call is a local memory read costing about ten milliseconds, so this is cheap — but the countdown itself ticks locally between polls and does not need one."
+      },
+      {
+        "key": "urgentMinutes",
+        "type": "integer",
+        "label": "Go urgent within (minutes)",
+        "min": 0,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5,
+        "description": "How close the next event has to be before the widget takes the urgent colour. Zero never does."
+      }
+    ]
+  }
+}
