@@ -126,11 +126,22 @@ at the bottom that does three things.
 | `Tab` | switch the box to asking, and back |
 | `Esc` | out of asking, then out of the overlay |
 
+**Today stays on screen while you ask**, because you are usually asking about
+what you can see — glance at the list, notice the thing that is missing from it,
+Tab, say so, and watch it arrive:
+
+> *add buy potatoes to today*
+> Done. "Buy potatoes" is created and scheduled for today, September 3. That
+> makes 4 open tasks today.
+
+The new row animates into the list as the sentence appears, so the confirmation
+is the list changing rather than only a claim that it did.
+
 Asking runs `rtn ask`, which is the `claude` already on your PATH pointed at
 Routine's MCP server and nothing else. It can read anything and create or amend
 a task; it cannot delete, restructure, or message anyone — the tool list is an
 allowlist and that is the boundary. Today is put into its prompt before it
-starts, so the common questions are answered without a single tool call:
+starts, so questions it already covers need no tool call at all:
 
 > *how much free time before my next meeting?*
 > Today's only event is "Catch up" at 16:00. It is 10:55 now, so you have about

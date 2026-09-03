@@ -415,7 +415,6 @@ Item {
         Row {
           width: parent.width
           spacing: Style.spacing.xs
-          visible: !root.asking
           Text {
             text: "Today"
             textFormat: Text.PlainText
@@ -435,7 +434,7 @@ Item {
         // The "well done" state is worth drawing rather than leaving a gap.
         Text {
           width: parent.width
-          visible: !root.asking && text !== ""
+          visible: text !== ""
           text: root.cache.ok && root.cache.tasks.length === 0
             ? "Nothing left for today."
             : (root.cache.ok ? "" : (root.cache.error + "  —  try: rtn doctor"))
@@ -445,26 +444,20 @@ Item {
           wrapMode: Text.WordWrap
         }
 
-        // The answer takes the list's place while asking, so the card does not
-        // grow a second panel and shift under the cursor.
-        Text {
-          width: parent.width
-          visible: root.asking
-          text: root.thinking ? "thinking…"
-                              : (root.answer !== "" ? root.answer
-                                                    : "Ask about today, your tasks, your week — or tell it to add something.")
-          textFormat: Text.PlainText          // a model's words are still a server's words
-          color: root.thinking || root.answer === "" ? root.muted : root.foreground
-          font.pixelSize: Style.font.body
-          wrapMode: Text.WordWrap
-          opacity: root.thinking ? 0.7 : 1.0
-          Behavior on opacity { NumberAnimation { duration: 180 } }
-        }
-
         Column {
           width: parent.width
           spacing: Style.spacing.hairline
-          visible: !root.asking
+
+          // A task the agent just made should arrive rather than appear, so
+          // the change is something you watched happen.
+          add: Transition {
+            NumberAnimation { properties: "opacity"; from: 0; to: 1; duration: 260 }
+            NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
+          }
+          move: Transition {
+            NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
+          }
+
           Repeater {
             model: root.cache.tasks
             delegate: TaskRow {
@@ -481,6 +474,34 @@ Item {
         }
 
         // ---- capture --------------------------------------------------------
+        // Below the day, above the box: you asked from what you can see, and the
+        // answer lands next to it rather than in place of it.
+        Rectangle {
+          width: parent.width
+          height: reply.implicitHeight + Style.space(14)
+          radius: Style.space(5)
+          color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.07)
+          visible: root.asking && (root.thinking || root.answer !== "")
+          opacity: visible ? 1 : 0
+          Behavior on opacity { NumberAnimation { duration: 200 } }
+
+          Text {
+            id: reply
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: Style.space(7)
+            text: root.thinking ? "thinking…" : root.answer
+            // A model's words are still a server's words.
+            textFormat: Text.PlainText
+            color: root.thinking ? root.muted : root.foreground
+            font.pixelSize: Style.font.body
+            wrapMode: Text.WordWrap
+            opacity: root.thinking ? 0.7 : 1.0
+            Behavior on opacity { NumberAnimation { duration: 180 } }
+          }
+        }
+
         TextField {
           id: input
           width: parent.width
