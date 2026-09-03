@@ -4,19 +4,32 @@ An Omarchy shell plugin fronting [Routine](https://routine.co): the dashboard as
 a Quickshell overlay, a countdown to the next meeting in the bar, and capture
 straight into today's journal.
 
-**Why it exists.** Routine ships its own dashboard (`routine://dashboard`) with
-the shape we want — a ring counting down to the next event, a NEXT card, today's
-tasks, a quick-create box. It takes anywhere between instant and 20–60s to load,
-and sometimes never. Everything it renders is reachable over Routine's MCP
-server, so the widget can be a Quickshell overlay that is always there.
+**Why it exists.** Routine's own dashboard (`routine://dashboard`) has the right
+shape — a ring counting down to the next event, a NEXT card, today's tasks, a
+quick-create box — and everything it renders is reachable over the MCP server.
+Drawing it in the shell instead makes it a keystroke rather than a window, and
+puts the countdown on the bar permanently, where a window cannot be.
 
 **What exists:** `rtn`, the Rust CLI everything else goes through, and the
 plugin — a bar countdown and the dashboard overlay. What is *not* built is the
 bar panel, which would be a smaller version of the overlay.
 
+## Gotchas, and how to read them
+
 Everything below was measured against a live server on 2026-09-02 (Routine MCP
-server 2.2.0, `routine-mcp-server`, 52 tools). Re-verify after a Routine update;
-the app is young and several of these are behaviours rather than contracts.
+server 2.2.0, 52 tools) on Arch Linux under Hyprland.
+
+**Treat all of it as observed behaviour with a date on it, not as contract.**
+The MCP server is new, Linux is a newer place for Routine than macOS, and a
+desktop shell asking these questions sixty times an hour is not the use it was
+first shaped around. Several of the notes here are the ordinary friction of
+being early to a surface — the sort of thing that gets smoothed as more people
+build on it, and some of which may already be different by the time you read
+this. Re-verify after a Routine update rather than trusting the page.
+
+They are written down because each one cost real time to find, and none of them
+is guessable from the schema. If you are building the second one of these, start
+here.
 
 ## The transport
 
@@ -60,18 +73,19 @@ State is hydrated in memory in the main process, and the MCP server runs inside
 that same process — which is why it answers in single-digit milliseconds.
 
 **Do not read the op log directly.** No schema, no index, no documentation,
-rewritten live, and it would break on any Routine update. It is also `0644`
-under `0755` directories, so every note, contact and calendar entry is readable
-by any local process — Routine's choice, worth knowing, and not a reason to add
-a second reader.
+rewritten live, and it would break on any Routine update — the MCP server is the
+supported way in and it is fast enough that there is no reason to want another.
+Worth knowing that it sits at `0644` under `0755` directories, so on a shared
+machine it is readable by other local users; not a reason to add a second
+reader.
 
-**What this says about the plugin.** The dashboard takes between instant and a
-minute to load while the data behind it answers in milliseconds, from the same
-process. So the slowness is the Electron renderer and window lifecycle, not data
-access. The overlay is not a workaround for a slow backend; it is a fast
-renderer over a source that was never the problem.
+**What this says about the plugin.** The data layer is not the constraint — it
+answers in milliseconds from the same process that draws the window. So a native
+shell surface is not compensating for anything slow; it is a lighter renderer
+over a source that was already fast, and that is the whole reason this is worth
+building.
 
-## Response shapes, which are not uniform
+## Response shapes differ between tools
 
 Most tools return `result.structuredContent` already parsed. **Two do not** and
 return only a text block holding JSON:
@@ -79,12 +93,12 @@ return only a text block holding JSON:
 - `search_search`
 - `tables_searchTableRows`
 
-Any client must handle both or those two silently return nothing. Parse
-`structuredContent` when present, else `json.loads(result.content[0].text)`.
+Handle both shapes or those two come back empty. Parse `structuredContent` when
+present, else `json.loads(result.content[0].text)`.
 
-**`tables_listTables` does not list everything.** The app's type picker shows
-fifteen object types; `listTables` returns fourteen, silently omitting
-`projects`. The table is entirely usable — `getTableSchema` and
+**`tables_listTables` and the app's type picker can disagree.** The picker shows
+fifteen object types; `listTables` returned fourteen, without `projects`. The
+table is entirely usable — `getTableSchema` and
 `searchTableRows` both answer on it — it is just absent from the enumeration.
 Find it the way anything else undocumented is found:
 
@@ -94,8 +108,8 @@ search_search  {"query": "project", "kind": {"type": "table"}}
 ```
 
 Note the id comes back as `table_ref:<workspace>:<nanoid>`; the table tools want
-`table:<nanoid>`. So do not build a type list from `listTables` and assume it is
-complete, and do not conclude an entity is unreachable because it is missing.
+`table:<nanoid>`. The practical rule: an entity missing from the enumeration is
+not necessarily out of reach — look for it before concluding it is.
 
 ## What the data actually looks like
 
@@ -103,9 +117,10 @@ complete, and do not conclude an entity is unreachable because it is missing.
 Sep 4, Sep 2, Sep 4 for a three-day range. Sort client-side or "next meeting"
 lies.
 
-**Event descriptions are hostile.** A Teams invite is thousands of characters of
-dial-in numbers, `<…>`-wrapped links and corporate legalese, with the one useful
-item — the join URL — buried in it. Extract the join link against an allowlist
+**Event descriptions arrive as the sender wrote them.** A Teams invite is
+thousands of characters of dial-in numbers, `<…>`-wrapped links and corporate
+legal text, with the one useful item — the join URL — buried in it. Routine
+passes it through faithfully, which is right; the trimming is the client's job. Extract the join link against an allowlist
 of meeting hosts in the helper; never let the description itself reach QML.
 `location` is the cheap signal (`"Microsoft Teams Meeting"`), and matching it
 against a small bounded pattern set is how the platform glyph gets chosen.
@@ -121,12 +136,12 @@ list tools as an index, never as a payload.
 **`scheduled` is a bare string**: `"2026-09-02"` for a day, `YYYY-WW` for a week
 batch ("Week 36" in the app). It is absent, not null, when unset.
 
-**Planning is one-way — a schedule cannot be removed over MCP.** `updateTask`
-with `scheduled: null` answers success and changes nothing, because `null` is
-the schema's "leave alone" default, and there is no sentinel for empty:
+**Scheduling is currently one-way over MCP.** `updateTask` with
+`scheduled: null` answers success and changes nothing — `null` is the schema's
+"leave alone" default, and there is no separate sentinel for empty:
 `{"date":""}` and `{"week":""}` fail to parse, `"unplanned"` and `{}` fail to
-match `scheduled_input`. The app can unplan a task; the plugin never will be
-able to. Do not design an affordance that needs it.
+match `scheduled_input`. The app can unplan a task; a client cannot yet. Until
+there is a way to say it, do not build an affordance that needs one.
 
 Corollary for capture: **create tasks unplanned and leave them there.** A task
 created with a journal `parent` and no `scheduled` comes back with no
@@ -134,10 +149,10 @@ created with a journal `parent` and no `scheduled` comes back with no
 the day it was captured — the parent already carries that. Planning it as well
 puts it in Wednesday for no gain, and cannot be undone from here.
 
-## `listTodaysTasks` is not what feeds the app's Today
+## Today is a union of two reads
 
-The single most surprising finding, and it will bite any dashboard built the
-obvious way.
+The most surprising shape here, and the one worth knowing before building the
+obvious thing.
 
 A task whose only anchor is a **parent pointing at today's journal row** — which
 is what every checkbox typed into the daily note is — appears in **neither**
@@ -153,7 +168,7 @@ So the Today card is a union of two reads:
 
 Both are one call. Neither is sufficient alone.
 
-## The journal, and how to append without destroying it
+## The journal, and how to append without disturbing it
 
 Routine's daily note is a row in a user-defined table (`journal`, here
 `table:daily_notes__…`) with two columns, `Title` and `Notes`. The
@@ -162,7 +177,7 @@ bound to real tasks. **The daily note is the task list.**
 
 Three facts govern every write to it:
 
-**There is no append.** `tables_write_updateNotesColumn` replaces the entire
+**There is no append yet.** `tables_write_updateNotesColumn` replaces the entire
 document. The `/daily` house rule — *the day belongs to other tools too; append
 at the end and touch nothing above it* — therefore has to be constructed.
 
@@ -251,17 +266,18 @@ line.
 
 ### A checkbox takes two calls, in this order
 
-**Never write a `todo` block with `task: null`.** Measured 2026-09-02, twice in
-one write. The MCP mints a task for the block server-side; the Electron client,
+**Give a `todo` block a real task id rather than a null one.** Measured
+2026-09-02, twice in one write. The MCP mints a task for the block server-side; the Electron client,
 syncing the same document, sees a todo block and mints its own. **Two tasks per
-block**, one of which wins the binding arbitrarily — in the same import, one
-pair bound the note's copy and the other bound the orphan. Both are parented to
-the journal row, so both show in the app's Unplanned list and neither shows up
-over MCP. The failure is silent and permanent: the calendar block you drag out
-of the orphan is not the task your checkbox completes.
+block**, and which of them wins the binding is not predictable — in the same
+import, one pair bound the note's copy and the other bound the orphan. Both are
+parented to the journal row, so both appear in the app's Unplanned list while
+neither comes back over MCP. It is worth avoiding rather than detecting: the
+calendar block dragged out of the orphan is not the task the checkbox completes,
+and nothing announces that.
 
 **And `createTask(parent = <journal row>)` does not insert a block.** The
-relationship is one-way — a todo block mints a task, a parented task does not
+relationship runs one way — a todo block mints a task; a parented task does not
 mint a block. Three tasks created against today's row left the note untouched.
 So the block has to be authored; there is no atomic path that does both.
 

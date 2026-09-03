@@ -170,7 +170,7 @@ Routine, with its MCP server enabled in **Settings → MCP** (it is off by
 default). Rust to build. The plugin additionally wants Omarchy's Quickshell
 `omarchy-shell`; `rtn` alone needs neither.
 
-## Field notes
+## Field notes and gotchas
 
 `CLAUDE.md` is the working record kept while building this: how the MCP server
 behaves, measured rather than assumed, with the traces behind each finding. It
@@ -178,8 +178,13 @@ covers the shapes that are not obvious from the schema — how a daily note's
 checkboxes relate to tasks, how to append to a note without disturbing what is
 already in it, how the two sides converge after a write.
 
-It is written for whoever builds the next one of these, and it is the part of
-this repo most likely to save someone else a day.
+Everything in it is **observed behaviour with a date on it, not contract**. The
+MCP server is new and Linux is a newer place for Routine than macOS, so some of
+it is the ordinary friction of being early to a surface, and some may already
+have changed. Re-verify after an update rather than trusting the page — and if
+something there is now wrong, a PR fixing it is welcome.
+
+It is written for whoever builds the next one of these.
 
 ## Thanks
 
