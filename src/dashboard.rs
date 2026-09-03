@@ -12,6 +12,15 @@
 //!     `listTodaysTasks`, while the app shows it in Today. So the list is the
 //!     note's todo blocks *plus* the tasks scheduled for today, deduplicated.
 //!
+//!   * **A task blocked on the calendar is an event, and only an event.** It
+//!     leaves `listTodaysTasks` entirely and comes back through
+//!     `listEventsForDateRange` with nothing in the list entry to say it is
+//!     not a meeting; `getEvent` carries `allocationOfTask`. So the day is
+//!     drawn as an *agenda* — meetings and blocks together, in time order,
+//!     each with its kind — and a task that is in the agenda is not also in
+//!     the list. The countdown counts to the next agenda item of either
+//!     kind: a block is time you committed, and it deserves the same ring.
+//!
 //!   * **An event description is hostile.** A Teams invite is thousands of
 //!     characters of dial-in numbers, legal text and angle-bracketed links. The
 //!     one useful thing in it is the join URL, so that is extracted here
@@ -113,20 +122,16 @@ fn events_for(client: &Client, day: Date) -> mcp::Result<Vec<Value>> {
     Ok(items)
 }
 
-/// One event, reduced to what a widget may render. The description is read for
-/// a join link and then dropped.
-fn reduce_event(client: &Client, raw: &Value, detail: bool) -> Value {
+/// One agenda item, reduced to what a widget may render. `full` is the
+/// `getEvent` detail: its description is read for a join link and dropped,
+/// and `allocationOfTask` is what makes it a block rather than a meeting.
+/// `completed` is the block's task state, looked up by the caller.
+fn reduce_event(raw: &Value, full: &Value, completed: Option<bool>) -> Value {
     let id = raw.get("id").and_then(Value::as_str).unwrap_or("");
     let start = raw.pointer("/time/start_time").and_then(Value::as_str).unwrap_or("");
     let end = raw.pointer("/time/end_time").and_then(Value::as_str).unwrap_or("");
+    let task = full.get("allocationOfTask").and_then(Value::as_str).unwrap_or("");
 
-    // Only the next event is worth a second call; the rest of the day does not
-    // need a join button.
-    let full = if detail {
-        client.call("personal_events_getEvent", json!({ "event": id })).unwrap_or(Value::Null)
-    } else {
-        Value::Null
-    };
     let location = full.get("location").and_then(Value::as_str).unwrap_or("");
     let description = full.get("description").and_then(Value::as_str).unwrap_or("");
     let link = join_link(description).or_else(|| join_link(location));
@@ -135,15 +140,22 @@ fn reduce_event(client: &Client, raw: &Value, detail: bool) -> Value {
         None => (None, None),
     };
 
-    json!({
+    let mut item = json!({
         "id": id,
+        "kind": if task.is_empty() { "meeting" } else { "block" },
         "title": clamp(raw.get("title").and_then(Value::as_str).unwrap_or(""), MAX_TITLE),
         "start": start,
         "end": end,
         "at": start.get(11..16).unwrap_or(""),
+        "length": minutes_between(start, end).unwrap_or(0).max(0),
         "platform": platform(location, from_link),
         "join": join,
-    })
+    });
+    if !task.is_empty() {
+        item["task"] = json!(task);
+        item["done"] = json!(completed.unwrap_or(false));
+    }
+    item
 }
 
 /// Minutes between two same-day `…Thh:mm:ss` stamps, by the clock face.
@@ -163,25 +175,43 @@ pub fn build(client: &Client, jrn: &Journal) -> Result<(String, Value), String> 
         ))
         .unwrap_or_default();
 
+    // --- The agenda: every timed thing on the day, meetings and blocks alike.
+    // --- Each wants its detail: the join link for a meeting, the task for a
+    // --- block. Twenty local reads at a millisecond each.
     let raw_events = events_for(client, day).map_err(|e| e.to_string())?;
-    let next_index = raw_events.iter().position(|e| {
-        e.pointer("/time/start_time").and_then(Value::as_str).unwrap_or("") > stamp.as_str()
-    });
-    let events: Vec<Value> = raw_events
-        .iter()
-        .enumerate()
-        .map(|(i, e)| reduce_event(client, e, Some(i) == next_index))
-        .collect();
+    let mut agenda: Vec<Value> = Vec::new();
+    let mut blocked: Vec<String> = Vec::new();
+    for raw in &raw_events {
+        let id = raw.get("id").and_then(Value::as_str).unwrap_or("");
+        let full = client
+            .call("personal_events_getEvent", json!({ "event": id }))
+            .unwrap_or(Value::Null);
+        let task = full.get("allocationOfTask").and_then(Value::as_str).unwrap_or("");
+        let completed = if task.is_empty() {
+            None
+        } else {
+            blocked.push(task.to_owned());
+            client
+                .call("tasks_getTask", json!({ "task": task }))
+                .ok()
+                .and_then(|t| t.get("completed").and_then(Value::as_bool))
+        };
+        agenda.push(reduce_event(raw, &full, completed));
+    }
 
-    let next = next_index.map(|i| {
-        let mut e = events[i].clone();
-        let mins = minutes_between(&stamp, e["start"].as_str().unwrap_or("")).unwrap_or(0);
-        e["minutes"] = json!(mins);
-        e
-    });
+    let next = agenda
+        .iter()
+        .find(|e| e["start"].as_str().unwrap_or("") > stamp.as_str())
+        .map(|e| {
+            let mut e = e.clone();
+            let mins = minutes_between(&stamp, e["start"].as_str().unwrap_or("")).unwrap_or(0);
+            e["minutes"] = json!(mins);
+            e
+        });
 
     // --- Today's tasks: the note's checkboxes, then anything scheduled that
-    // --- is not already among them.
+    // --- is not already among them — and nothing that is already a block,
+    // --- which is drawn in the agenda instead.
     let (row, _) = jrn.row_for(client, day).map_err(|e| e.to_string())?;
     let doc = mcp::unwrap(
         &client.call("tables_getObject", json!({ "object": row })).map_err(|e| e.to_string())?,
@@ -193,6 +223,9 @@ pub fn build(client: &Client, jrn: &Journal) -> Result<(String, Value), String> 
             let id = b.get("task").and_then(Value::as_str).unwrap_or("").to_owned();
             if !id.is_empty() {
                 seen.push(id.clone());
+            }
+            if blocked.contains(&id) {
+                continue;
             }
             tasks.push(json!({
                 "id": id,
@@ -207,7 +240,7 @@ pub fn build(client: &Client, jrn: &Journal) -> Result<(String, Value), String> 
         .map_err(|e| e.to_string())?;
     for t in scheduled.pointer("/todo/items").and_then(Value::as_array).unwrap_or(&vec![]) {
         let id = t.get("id").and_then(Value::as_str).unwrap_or("").to_owned();
-        if seen.contains(&id) {
+        if seen.contains(&id) || blocked.contains(&id) {
             continue;
         }
         tasks.push(json!({
@@ -218,20 +251,22 @@ pub fn build(client: &Client, jrn: &Journal) -> Result<(String, Value), String> 
         }));
     }
     tasks.truncate(MAX_TASKS);
-    let open = tasks.iter().filter(|t| t["done"] == false).count();
+    // Open counts blocks too: a block is a task with a time, not a meeting.
+    let open = tasks.iter().filter(|t| t["done"] == false).count()
+        + agenda.iter().filter(|e| e["kind"] == "block" && e["done"] == false).count();
 
     let payload = json!({
         "date": day.to_string(),
         "title": journal::title_for(day),
         "now": stamp,
         "next": next,
-        "events": events,
+        "agenda": agenda,
         "tasks": tasks,
         "open": open,
     });
 
     // The human rendering is a courtesy; --json is what this command is for.
-    let mut out = format!("# {}\n\n", journal::title_for(day));
+    let mut out = format!("# {}  —  {open} open\n\n", journal::title_for(day));
     match &payload["next"] {
         Value::Null => out += "*nothing else today*\n\n",
         n => {
@@ -243,7 +278,24 @@ pub fn build(client: &Client, jrn: &Journal) -> Result<(String, Value), String> 
             );
         }
     }
-    out += &format!("## Tasks — {open} open\n\n");
+    if !agenda.is_empty() {
+        out += "## Scheduled\n\n";
+        for e in payload["agenda"].as_array().unwrap_or(&vec![]) {
+            let mark = match (e["kind"].as_str(), e["done"].as_bool()) {
+                (Some("block"), Some(true)) => "[x] ",
+                (Some("block"), _) => "[ ] ",
+                _ => "",
+            };
+            out += &format!(
+                "- **{}** {mark}{}  *({}m)*\n",
+                e["at"].as_str().unwrap_or(""),
+                e["title"].as_str().unwrap_or(""),
+                e["length"].as_i64().unwrap_or(0),
+            );
+        }
+        out += "\n";
+    }
+    out += "## Anytime\n\n";
     for t in payload["tasks"].as_array().unwrap_or(&vec![]) {
         out += &format!(
             "- [{}] {}\n",
@@ -304,6 +356,31 @@ mod tests {
         assert_eq!(platform("Google Meet", None), Some("meet"));
         assert_eq!(platform("Room 3", Some("zoom")), Some("zoom"));
         assert_eq!(platform("Room 3", None), None);
+    }
+
+    #[test]
+    fn a_block_is_told_from_a_meeting_by_its_task() {
+        let raw = json!({"id": "event:1", "title": "Pick up car\n", "time": {
+            "start_time": "2026-09-03T14:00:00+03:00", "end_time": "2026-09-03T15:00:00+03:00"}});
+        let block = reduce_event(&raw, &json!({"allocationOfTask": "task:9"}), Some(false));
+        assert_eq!(block["kind"], "block");
+        assert_eq!(block["task"], "task:9");
+        assert_eq!(block["done"], false);
+        assert_eq!(block["length"], 60);
+        assert_eq!(block["at"], "14:00");
+        assert_eq!(block["title"], "Pick up car");
+
+        let meeting = reduce_event(&raw, &json!({"location": "Microsoft Teams Meeting", "description": TEAMS}), None);
+        assert_eq!(meeting["kind"], "meeting");
+        assert!(meeting.get("task").is_none(), "a meeting has no task and no done");
+        assert!(meeting.get("done").is_none());
+        assert_eq!(meeting["platform"], "teams");
+        assert!(meeting["join"].as_str().unwrap().starts_with("https://teams.microsoft.com/meet/"));
+
+        // No detail at all — getEvent failed — is still a meeting, drawn plainly.
+        let plain = reduce_event(&raw, &Value::Null, None);
+        assert_eq!(plain["kind"], "meeting");
+        assert_eq!(plain["join"], Value::Null);
     }
 
     #[test]

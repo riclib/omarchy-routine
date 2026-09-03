@@ -122,9 +122,21 @@ Two surfaces, one data source.
 window in the way. It goes urgent inside five minutes. Left click focuses
 Routine, middle click joins the next meeting, right click refreshes.
 
-**An overlay** with the dashboard: the countdown ring, the next event with its
-platform and a Join button, today's list with working checkboxes, and one box
-at the bottom that does three things.
+**An overlay** with the dashboard: the countdown ring, the next thing with its
+platform and a Join button, the day's agenda, the tasks with no time on them,
+and one box at the bottom that does three things.
+
+**The day is two lists.** *Scheduled* is everything with a time — meetings and
+task blocks together, in order, each drawn the same way so the eye reads the
+day as one sequence. A block keeps its checkbox and its length; a meeting keeps
+its platform glyph and Join. What is over collapses to "2 earlier" so the card
+does not grow all afternoon. *Anytime* is the rest of today's tasks: the
+journal's checkboxes and anything scheduled for the day without a time.
+
+**The ring counts to the next item of either kind.** A block is time you
+committed, and it gets the same seriousness as a meeting: the card says NEXT
+BLOCK, and the countdown is to it. Nothing appears twice — a task that is on
+the calendar is in the agenda and not in the list.
 
 | | |
 | --- | --- |

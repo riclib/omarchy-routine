@@ -74,6 +74,7 @@ Item {
   function open(payloadJson) {
     root.draft = ""
     root.flash = ""
+    root.showPast = false
     root.thread = []
     root.session = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10)
     root.mode = "log"
@@ -105,8 +106,19 @@ Item {
   readonly property int openCount: {
     var n = 0
     for (var i = 0; i < cache.tasks.length; i++) if (!isDone(cache.tasks[i])) n++
+    for (var j = 0; j < cache.agenda.length; j++) {
+      var e = cache.agenda[j]
+      if (e.kind === "block" && !isDone({ id: e.task, done: e.done })) n++
+    }
     return n
   }
+
+  // The agenda splits at the clock: what is over collapses to one line so the
+  // card does not grow all afternoon, and what is still to come stays.
+  property bool showPast: false
+  readonly property var pastAgenda: cache.agenda.filter(function(e) { return Model.isPast(e.end, root.nowMs) })
+  readonly property var comingAgenda: cache.agenda.filter(function(e) { return !Model.isPast(e.end, root.nowMs) })
+  readonly property var shownAgenda: root.showPast ? cache.agenda : root.comingAgenda
 
   Process {
     id: dash
@@ -295,6 +307,10 @@ Item {
       root.enqueue(["xdg-open", cache.next.join])
   }
 
+  function joinItem(item) {
+    if (item && item.join !== "") root.enqueue(["xdg-open", item.join])
+  }
+
   Timer {
     interval: 10000
     running: root.opened
@@ -390,7 +406,7 @@ Item {
             spacing: Style.spacing.xxs
 
             Text {
-              text: root.cache.next ? "NEXT" : ""
+              text: root.cache.next ? (root.cache.next.kind === "block" ? "NEXT BLOCK" : "NEXT") : ""
               textFormat: Text.PlainText
               color: root.muted
               font.pixelSize: Style.font.caption
@@ -447,12 +463,71 @@ Item {
           }
         }
 
-        // ---- today's list -------------------------------------------------
+        // ---- the agenda: meetings and blocks, in order ----------------------
+        Row {
+          width: parent.width
+          spacing: Style.spacing.xs
+          visible: root.cache.ok && root.cache.agenda.length > 0
+          Text {
+            text: "Scheduled"
+            textFormat: Text.PlainText
+            color: root.foreground
+            font.pixelSize: Style.font.subtitle
+            font.weight: Font.DemiBold
+          }
+          Text {
+            text: root.pastAgenda.length === 0 ? ""
+              : (root.showPast ? "hide earlier" : root.pastAgenda.length + " earlier")
+            textFormat: Text.PlainText
+            color: pastArea.containsMouse ? root.foreground : root.muted
+            font.pixelSize: Style.font.body
+            anchors.verticalCenter: parent.verticalCenter
+            MouseArea {
+              id: pastArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.showPast = !root.showPast
+            }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.hairline
+          visible: root.cache.ok && root.cache.agenda.length > 0
+
+          add: Transition {
+            NumberAnimation { properties: "opacity"; from: 0; to: 1; duration: 260 }
+            NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
+          }
+          move: Transition {
+            NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
+          }
+
+          Repeater {
+            model: root.shownAgenda
+            delegate: AgendaRow {
+              required property var modelData
+              width: contentColumn.width
+              item: modelData
+              done: modelData.kind === "block" && root.isDone({ id: modelData.task, done: modelData.done })
+              past: Model.isPast(modelData.end, root.nowMs)
+              foreground: root.foreground
+              muted: root.muted
+              accent: root.accent
+              onToggled: root.toggleTask({ id: modelData.task, done: modelData.done })
+              onJoined: { root.joinItem(modelData); root.close() }
+            }
+          }
+        }
+
+        // ---- anytime today: the tasks with no time on them ---------------
         Row {
           width: parent.width
           spacing: Style.spacing.xs
           Text {
-            text: "Today"
+            text: "Anytime"
             textFormat: Text.PlainText
             color: root.foreground
             font.pixelSize: Style.font.subtitle
@@ -472,7 +547,7 @@ Item {
           width: parent.width
           visible: text !== ""
           text: root.cache.ok && root.cache.tasks.length === 0
-            ? "Nothing left for today."
+            ? (root.cache.agenda.length > 0 ? "Nothing without a time." : "Nothing left for today.")
             : (root.cache.ok ? "" : (root.cache.error + "  —  try: rtn doctor"))
           textFormat: Text.PlainText
           color: root.muted
