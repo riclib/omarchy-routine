@@ -3,8 +3,9 @@
 [Routine](https://routine.co) on the Linux desktop: a command line, and an
 [Omarchy](https://omarchy.org) shell plugin built on top of it.
 
-Both talk to Routine through the MCP server the app ships — nothing is scraped,
-nothing is reverse-engineered, and no credential leaves the machine.
+Both are built on the MCP server Routine ships — nothing is scraped, nothing is
+reverse-engineered, and no credential leaves the machine. Routine did the part
+that makes this possible; this is just a second surface onto it.
 
 ```
   Wednesday 17:38  󰃰 21m          ← the bar, counting down to the next meeting
@@ -18,19 +19,23 @@ into.
 
 ## Why it exists
 
-Routine's own dashboard has exactly the right shape. On this machine it takes
-anywhere between no time and a minute to appear, and sometimes never.
+Some things want to live in the desktop rather than in a window: how long until
+the next meeting, whether today is clear, a thought you want written down before
+it evaporates. Not because the app is missing them — Routine has all of it — but
+because a window you have to bring forward is a different thing from a number
+that is simply always on the bar, and a capture box a keystroke away is a
+different thing from one a context switch away.
 
-That turned out not to be a data problem. Measured against the local MCP server,
-a week of events comes back in **5 ms**, today's tasks in **1 ms**, and the
-entire journal table with every note body in **1.5 ms**. Routine is local-first —
-the workspace is hydrated in memory in the main process, and the MCP server runs
-inside that same process, so a read never touches the network. The dashboard is
-slow because it is an Electron renderer being built, not because the data is far
-away.
+**It works because Routine is local-first.** The workspace is hydrated in memory
+in the app's main process, and the MCP server runs inside that same process, so
+a read never touches the network. Measured here: a week of events in **5 ms**,
+today's tasks in **1 ms**, the entire journal table with every note body in
+**1.5 ms**. That is what makes a bar widget honest — it can ask sixty times an
+hour and cost nothing, so the countdown on your bar is never stale and never a
+guess.
 
-So this is not a workaround for a slow backend. It is a different renderer over
-a source that was already fast.
+Very little of this would be worth building against a cloud API with a rate
+limit. It is worth building against a local one that answers in a millisecond.
 
 ---
 
@@ -103,10 +108,9 @@ terminal or a chat.
 
 Two surfaces, one data source.
 
-**A bar widget** showing how long until the next thing — permanently, which is
-the one thing a dashboard you have to open cannot do. It goes urgent inside five
-minutes. Left click focuses Routine, middle click joins the next meeting, right
-click refreshes.
+**A bar widget** showing how long until the next thing, permanently, with no
+window in the way. It goes urgent inside five minutes. Left click focuses
+Routine, middle click joins the next meeting, right click refreshes.
 
 **An overlay** with the dashboard: the countdown ring, the next event with its
 platform and a Join button, today's list with working checkboxes, and a capture
@@ -145,9 +149,9 @@ decides which links are safe to open; the widget only paints what comes back. A
 credential does not belong in a shared shell process, and neither does the job
 of parsing a meeting invite.
 
-That boundary does real work. An event description is a hostile thing — a Teams
-invite is thousands of characters of dial-in numbers, legal text and
-angle-bracketed links, with one useful item buried in it. `rtn` extracts the
+That boundary does real work. A calendar invite arrives as whoever sent it wrote
+it — a Teams one is thousands of characters of dial-in numbers, legal text and
+angle-bracketed links, with the one useful item buried in it. `rtn` extracts the
 join link against an **allowlist of hosts**, matching on the host rather than
 the URL so that `example.com/zoom.us/j/1` and `teams.microsoft.com.evil.test`
 are both nothing, and the description itself never leaves the process.
@@ -156,9 +160,9 @@ are both nothing, and the description itself never leaves the process.
 call a minute; the clock face costs nothing.
 
 **Nothing waits for a round trip it does not have to.** Ticking a box fills it
-immediately — the task changes at once, but the note's checkbox trails it by
-about five seconds through the app's own sync, and a box that waits for the
-truth looks broken.
+immediately. The task completes at once and the note's checkbox follows a moment
+later as the app syncs the document, so the widget shows the tick straight away
+and reconciles when the note catches up.
 
 ## Requirements
 
@@ -166,12 +170,23 @@ Routine, with its MCP server enabled in **Settings → MCP** (it is off by
 default). Rust to build. The plugin additionally wants Omarchy's Quickshell
 `omarchy-shell`; `rtn` alone needs neither.
 
-## Notes on Routine's MCP surface
+## Field notes
 
-`CLAUDE.md` is the working record: what the server does, measured rather than
-assumed, including a handful of behaviours that are not documented anywhere and
-that bit hard enough to be worth writing down. Some of it may be useful to
-anyone else building against it.
+`CLAUDE.md` is the working record kept while building this: how the MCP server
+behaves, measured rather than assumed, with the traces behind each finding. It
+covers the shapes that are not obvious from the schema — how a daily note's
+checkboxes relate to tasks, how to append to a note without disturbing what is
+already in it, how the two sides converge after a write.
+
+It is written for whoever builds the next one of these, and it is the part of
+this repo most likely to save someone else a day.
+
+## Thanks
+
+To the Routine team for shipping an MCP server at all, and for making it local
+and fast enough that a desktop integration is a few milliseconds rather than a
+sync problem. And to [Omarchy](https://omarchy.org), whose shell makes a plugin
+like this a couple of QML files rather than a project.
 
 ## License
 
