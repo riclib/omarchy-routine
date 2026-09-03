@@ -24,10 +24,6 @@ Item {
 
   readonly property string pluginDir: manifest?.__sourceDir
     || (Quickshell.env("HOME") + "/.config/omarchy/plugins/riclib.routine")
-  readonly property string askAgent: {
-    var v = shell?.pluginSetting?.(manifest?.id || "riclib.routine", "askAgent", "")
-    return String(v || "")
-  }
   readonly property string askModel: {
     var v = shell?.pluginSetting?.(manifest?.id || "riclib.routine", "askModel", "")
     return String(v || "")
@@ -211,7 +207,6 @@ Item {
     root.answer = ""
     root.flash = ""
     var argv = [root.rtnBin, "ask", question]
-    if (root.askAgent !== "") argv.push("--agent", root.askAgent)
     if (root.askModel !== "") argv.push("--model", root.askModel)
     askProc.command = argv
     askProc.running = false
@@ -250,7 +245,7 @@ Item {
         // A question may well have changed something.
         root.refresh()
       } else if (root.answer === "") {
-        root.answer = "That did not work. `rtn ask` needs the claude CLI on PATH."
+        root.answer = "That did not work. `rtn ask` needs a model and a key in ~/.config/rtn/ask.yaml; `rtn doctor` says what it found."
       }
     }
   }

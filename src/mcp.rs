@@ -91,16 +91,60 @@ impl Client {
         })
     }
 
+    /// Every tool the server offers, as it describes them: `name`,
+    /// `description` and `inputSchema` per entry. Paged by `nextCursor` in
+    /// the protocol, so the pages are followed even though the 52 here fit in
+    /// one.
+    pub fn list_tools(&self) -> Result<Vec<Value>> {
+        let mut tools = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let params = match &cursor {
+                Some(c) => json!({ "cursor": c }),
+                None => json!({}),
+            };
+            let result = self.rpc("tools/list", params)?;
+            if let Some(page) = result.get("tools").and_then(Value::as_array) {
+                tools.extend(page.iter().cloned());
+            }
+            cursor = result.get("nextCursor").and_then(Value::as_str).map(str::to_owned);
+            if cursor.is_none() {
+                return Ok(tools);
+            }
+        }
+    }
+
     /// One tool call. Returns the structured result.
     ///
     /// Most tools answer with `structuredContent` already parsed; `search_search`
     /// and `tables_searchTableRows` answer with a text block holding JSON
     /// instead, so both shapes are handled here rather than at every call site.
     pub fn call(&self, name: &str, arguments: Value) -> Result<Value> {
-        let body = json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": { "name": name, "arguments": arguments },
-        });
+        let result = self.rpc("tools/call", json!({ "name": name, "arguments": arguments }))?;
+
+        if result.get("isError").and_then(Value::as_bool) == Some(true) {
+            let m = result
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+                .unwrap_or("no detail");
+            return Err(Error::Tool(m.to_owned()));
+        }
+
+        if let Some(structured) = result.get("structuredContent") {
+            return Ok(structured.clone());
+        }
+        // The text-block shape.
+        match result.pointer("/content/0/text").and_then(Value::as_str) {
+            Some(text) => serde_json::from_str(text)
+                .map_err(|e| Error::Other(format!("unparseable content block: {e}"))),
+            None => Ok(Value::Null),
+        }
+    }
+
+    /// One JSON-RPC round trip. Returns the `result`, or the error the
+    /// transport or the RPC layer raised.
+    fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
 
         let response = self
             .agent
@@ -139,27 +183,9 @@ impl Client {
             return Err(Error::Rpc(m.to_owned()));
         }
 
-        let result = msg
-            .get("result")
-            .ok_or_else(|| Error::Other("reply carried no result".into()))?;
-
-        if result.get("isError").and_then(Value::as_bool) == Some(true) {
-            let m = result
-                .pointer("/content/0/text")
-                .and_then(Value::as_str)
-                .unwrap_or("no detail");
-            return Err(Error::Tool(m.to_owned()));
-        }
-
-        if let Some(structured) = result.get("structuredContent") {
-            return Ok(structured.clone());
-        }
-        // The text-block shape.
-        match result.pointer("/content/0/text").and_then(Value::as_str) {
-            Some(text) => serde_json::from_str(text)
-                .map_err(|e| Error::Other(format!("unparseable content block: {e}"))),
-            None => Ok(Value::Null),
-        }
+        msg.get("result")
+            .cloned()
+            .ok_or_else(|| Error::Other("reply carried no result".into()))
     }
 }
 

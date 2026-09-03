@@ -143,31 +143,46 @@ Tab, say so, and watch it arrive:
 The new row animates into the list as the sentence appears, so the confirmation
 is the list changing rather than only a claim that it did.
 
-### Which agent
+### Which model
 
-Omarchy already has a convention for this — `omarchy default agent`, stored in
-`~/.config/omarchy/defaults/agent` — and `rtn ask` follows it rather than
-inventing its own. What Omarchy standardises is *which* agent; there is no
-shared contract for driving one headlessly, and MCP wiring in particular
-differs: Claude takes a config **per invocation**, so it can be handed Routine
-and nothing else, while `grok`, `codex` and `opencode` read theirs from
-persistent config.
+`rtn ask` makes one direct call to a model you name, on either the Anthropic
+or the OpenAI wire shape. Between them those two cover the vendors and
+everything that imitates one — a gateway, a local runner, another vendor's
+endpoint. Say which in `~/.config/rtn/ask.yaml`:
 
-That scoping is the security boundary rather than a convenience, so `rtn ask`
-drives only agents where it holds — today that is `claude`. If your default is
-another, it says so and names the two ways out rather than quietly running
-something you did not choose. `--agent` and the plugin's `askAgent` setting
-override it.
+```yaml
+provider: anthropic            # or openai — and anything speaking either shape
+model: claude-haiku-4-5
+# base_url: https://api.anthropic.com   # the provider's own, unless a gateway
+# key: env:ANTHROPIC_API_KEY            # or the key itself, with the file at 0600
+```
 
-Asking runs `rtn ask`, which is the `claude` already on your PATH pointed at
-Routine's MCP server and nothing else. It can read anything and create or amend
-a task; it cannot delete, restructure, or message anyone — the tool list is an
-allowlist and that is the boundary. Today is put into its prompt before it
-starts, so questions it already covers need no tool call at all:
+`key:` says where the key comes from rather than leaving `rtn` to guess.
+`env:NAME` reads that variable when the call is made; a bare value is the key
+itself, and the file then has to be `0600` or it is refused; no `key:` at all
+falls back to the variable the vendor's own tools read. So a model behind the
+OpenAI shape at another host is three lines:
+
+```yaml
+provider: openai
+model: grok-4
+base_url: https://api.x.ai/v1
+key: env:XAI_API_KEY
+```
+
+`rtn doctor` reports what asking would do — provider, model, endpoint, and
+where the key would come from — and never the key. `--model` and the plugin's
+`askModel` setting override the model for one call.
+
+It can read anything and create or amend a task; it cannot delete, restructure,
+or message anyone. The tool list is an allowlist enforced twice — in what the
+model is offered, and again when it calls — and that is the boundary. It runs at
+most four turns and one minute. Today is put into its prompt before it starts,
+so questions it already covers need no tool call at all:
 
 > *how much free time before my next meeting?*
 > Today's only event is "Catch up" at 16:00. It is 10:55 now, so you have about
-> 5 hours free before it. — **one turn, 5.8s**
+> 5 hours free before it. — *one turn, no tool call*
 
 Ticking a box completes the task and the note's checkbox together, because in
 Routine they are two views of one thing.
