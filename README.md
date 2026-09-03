@@ -190,8 +190,27 @@ o.bind("MOD3 + R", "Routine dashboard", "omarchy-shell shell toggle riclib.routi
 ```
 
 **Settings:** `rtnBin` (leave it as `rtn` unless the graphical session does not
-inherit `~/.local/bin`, which is not guaranteed), `refreshSeconds`, and
-`urgentMinutes`.
+inherit `~/.local/bin`, which is not guaranteed), `refreshSeconds`,
+`urgentMinutes`, `askAgent` and `askModel`.
+
+### Removing it
+
+The plugin writes nothing outside its own directory, so taking it back is
+taking back what you added:
+
+```bash
+omarchy plugin disable riclib.routine        # out of the bar, files kept
+omarchy plugin remove riclib.routine         # or delete it outright
+rm -f ~/.local/bin/rtn                       # the CLI, if you want that gone too
+omarchy restart shell
+```
+
+Then drop the `riclib.routine` entry from `bar.layout` in
+`~/.config/omarchy/shell.json` and the keybinding, if you added one. Nothing
+else was touched: no menu entry, no managed block in your Hyprland config, no
+file under `~/.config` that this plugin created. Your Routine data is
+untouched — the journal entries and tasks it made are yours and stay where they
+are.
 
 ---
 
