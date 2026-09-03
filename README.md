@@ -17,9 +17,10 @@ that makes this possible; this is just a second surface onto it.
   Wednesday 17:38  󰃰 21m          ← the bar, counting down to the next meeting
 ```
 
-Press the key and the same data is a dashboard: a ring counting down, the next
-event with a join button, today's tasks with boxes that tick, and a line to type
-into.
+Press the key and the same data is a dashboard: a ring counting down, the day as
+an agenda, today's tasks with boxes that tick, and a line to type into.
+
+<img src="docs/overlay.png" alt="The Flea overlay: a countdown ring reading 1h25m until the next event, the day as a scheduled agenda with times and durations, unscheduled tasks below, and an ask box" width="620">
 
 ---
 
