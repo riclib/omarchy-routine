@@ -5,6 +5,7 @@
 //! Nothing else in this project talks to MCP; if a credential, a bound or a
 //! retry is involved, it belongs here rather than in QML or a prompt.
 
+mod ask;
 mod auth;
 mod dashboard;
 mod journal;
@@ -78,6 +79,27 @@ enum Command {
     Next,
     /// Tick a task off, put it back, or drop it
     Task(Task),
+    /// Add a task to the Inbox, unplanned
+    ///
+    /// No parent and no schedule, which is where a thought goes when it is not
+    /// yet a plan. `rtn log --task` is the other one: a checkbox in today's
+    /// journal entry, tied to the day it was captured.
+    Add {
+        /// The task title
+        title: Vec<String>,
+    },
+    /// Ask a question about your Routine, or tell it to do something
+    ///
+    /// Runs the `claude` on your PATH against Routine's MCP server and nothing
+    /// else. It can read anything and create or amend a task; it cannot delete,
+    /// restructure, or message anyone.
+    Ask {
+        /// The question. Omit it to read stdin.
+        question: Vec<String>,
+        /// Model to use, e.g. haiku or sonnet
+        #[arg(long)]
+        model: Option<String>,
+    },
     /// Everything the bar widget needs, in one call
     ///
     /// Today's events with a join link for the next one, and the tasks in
@@ -131,6 +153,27 @@ fn main() {
     }
 }
 
+pub fn today_iso() -> String {
+    today().to_string()
+}
+
+/// The clock, and today as markdown, for priming the agent's prompt.
+pub fn ask_context() -> (String, String) {
+    let now = OffsetDateTime::now_local().unwrap_or_else(|_| OffsetDateTime::now_utc());
+    let stamp = now
+        .format(&time::macros::format_description!(
+            "[weekday], [year]-[month]-[day], [hour]:[minute] local time"
+        ))
+        .unwrap_or_else(|_| today().to_string());
+    let context = mcp::Client::connect()
+        .ok()
+        .and_then(|c| journal::Journal::discover(&c).ok().map(|j| (c, j)))
+        .and_then(|(c, j)| dashboard::build(&c, &j).ok())
+        .map(|(md, _)| md)
+        .unwrap_or_else(|| "(could not read today)".into());
+    (stamp, context)
+}
+
 fn today() -> Date {
     OffsetDateTime::now_local()
         .unwrap_or_else(|_| OffsetDateTime::now_utc())
@@ -150,6 +193,18 @@ fn run() -> Result<(), String> {
         Command::Today => today_cmd(format),
         Command::Next => next_cmd(format),
         Command::Task(args) => task_cmd(args, format),
+        Command::Add { title } => add_cmd(&title.join(" "), format),
+        Command::Ask { question, model } => {
+            let mut q = question.join(" ");
+            if q.is_empty() && !std::io::stdin().is_terminal() {
+                std::io::stdin()
+                    .read_to_string(&mut q)
+                    .map_err(|e| format!("could not read stdin: {e}"))?;
+            }
+            let (answer, payload) = ask::run(q.trim(), model.as_deref())?;
+            render::emit(&answer, &payload, format);
+            Ok(())
+        }
         Command::Dashboard => {
             let client = mcp::Client::connect().map_err(|e| e.to_string())?;
             let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
@@ -240,6 +295,29 @@ fn log(args: Log, format: Format) -> Result<(), String> {
     Ok(())
 }
 
+/// The Inbox is a task with no parent and no schedule — Routine shows it under
+/// Unplanned, which is where something goes before it is a plan.
+fn add_cmd(title: &str, format: Format) -> Result<(), String> {
+    if title.trim().is_empty() {
+        return Err("add what? give it a title".into());
+    }
+    let client = mcp::Client::connect().map_err(|e| e.to_string())?;
+    let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
+    let made = client
+        .call(
+            "tasks_createTask",
+            json!({ "workspace": jrn.workspace, "title": title.trim() }),
+        )
+        .map_err(|e| e.to_string())?;
+    let id = made.get("taskId").and_then(Value::as_str).unwrap_or("");
+    render::emit(
+        &format!("**{}** — in the Inbox", title.trim()),
+        &json!({ "task": id, "title": title.trim(), "where": "inbox" }),
+        format,
+    );
+    Ok(())
+}
+
 /// `discarded` is a third state the app offers and the dashboard does not: a
 /// task that will not be worked on, as distinct from one still waiting.
 fn task_cmd(args: Task, format: Format) -> Result<(), String> {
@@ -271,39 +349,13 @@ fn truncate(s: &str, n: usize) -> String {
 }
 
 fn today_cmd(format: Format) -> Result<(), String> {
+    // The same union the dashboard builds, so the two never disagree about
+    // what "today" holds — a task anchored only to the journal row is invisible
+    // to listTodaysTasks but is very much on today.
     let client = mcp::Client::connect().map_err(|e| e.to_string())?;
     let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
-    let day = today();
-
-    let events = sorted_events(&client, day)?;
-    let tasks = client
-        .call("tasks_listTodaysTasks", json!({ "workspace": jrn.workspace, "limit": 50 }))
-        .map_err(|e| e.to_string())?;
-    let open = tasks.pointer("/todo/items").and_then(Value::as_array).cloned().unwrap_or_default();
-
-    let mut out = format!("# {}\n\n", journal::title_for(day));
-    out += "## Events\n\n";
-    if events.is_empty() {
-        out += "*nothing on the calendar*\n";
-    }
-    for e in &events {
-        let start = e.pointer("/time/start_time").and_then(Value::as_str).unwrap_or("");
-        let title = collapse(e.get("title").and_then(Value::as_str).unwrap_or(""));
-        out += &format!("- **{}** {}\n", start.get(11..16).unwrap_or("--:--"), truncate(&title, 66));
-    }
-    out += "\n## Tasks\n\n";
-    if open.is_empty() {
-        out += "*nothing scheduled for today*\n";
-    }
-    for t in &open {
-        out += &format!("- [ ] {}\n", truncate(&collapse(t["title"].as_str().unwrap_or("")), 66));
-    }
-
-    render::emit(
-        &out,
-        &json!({ "date": day.to_string(), "events": events, "tasks": tasks }),
-        format,
-    );
+    let (md, payload) = dashboard::build(&client, &jrn)?;
+    render::emit(&md, &payload, format);
     Ok(())
 }
 

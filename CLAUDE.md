@@ -341,17 +341,39 @@ Quick-create splits by how the input was submitted, not by guessing at it:
 
 | Key | Behaviour |
 | --- | --- |
-| `Enter` | sigil templates, deterministic, no model. `x …` → task to Inbox; `> …` → task scheduled today; anything else → paragraph appended to today's journal |
-| `Ctrl-P` | headless Claude proposes a plan; you approve it |
+| `Enter` | append to today's journal — deterministic, no model |
+| `Shift+Enter` | file a task in the Inbox, unplanned — deterministic, no model |
+| `Tab` | switch the same box to asking, and back |
 
-Sigils are a decision; cue-detection heuristics are a guess. Enter must never
-cost a model call or a wait.
+Which mode you are in is a decision you make, not one inferred from what you
+typed — cue-detection is a guess, and a capture box that sometimes costs five
+seconds and a model call is a capture box you stop trusting. Enter and
+Shift+Enter never do.
 
-The Ctrl-P path runs `claude -p` against the user's existing auth (no API key to
-manage), and the shape that matters is **the model gets no tools at all**. The
-helper pre-fetches a bounded context and the model returns a plan as JSON, which
-the helper validates against the real tool schemas and executes. Measured on one
-representative input:
+`rtn ask` runs `claude -p` against the user's existing auth (no API key to
+manage) with `--strict-mcp-config`, so it sees Routine's tools and nothing else
+— not the user's other MCP servers, and none of Claude Code's own file or shell
+tools. **The allowed tool list is the security boundary**: reads are broad,
+writes are `createTask` and `updateTask`, and there is no delete, no
+`tables_alter_*`, no other workspace and no `notices_createNotice` — asked to
+delete something it says it cannot and the task survives, verified.
+
+The thing that makes it usable is **priming the prompt**. Today's dashboard goes
+in before the agent starts, which costs 10 ms locally and removes the model
+round trips that are the entire latency. Measured on the same machine:
+
+| | |
+| --- | --- |
+| a question today's context answers | **1 turn, 5.8s, $0.036** |
+| a question needing a tool, or a write | 6 turns, ~19s |
+| the same question with no primed context | 6 turns, 50s |
+
+The system prompt carries the field notes below as a briefing — events being
+unsorted, Today being a union, scheduling being one-way, create-unplanned. An
+agent that does not know them makes exactly the mistakes this file records.
+
+An earlier design had the model propose a plan and a validator execute it.
+Measured on one representative input:
 
 | Config | Wall | Turns | Cost | Cache read |
 | --- | --- | --- | --- | --- |

@@ -36,6 +36,13 @@ Item {
   property string flash: ""
   property bool busy: false
 
+  // Two things you can do with one box. Capture is the fast path and never
+  // costs a model call; ask is deliberate, and Tab is how you say which.
+  property string mode: "log"                 // "log" | "ask"
+  readonly property bool asking: mode === "ask"
+  property string answer: ""
+  property bool thinking: false
+
   // Ticked off here the moment you click, rather than after a re-read. The
   // task updates at once but the note's checkbox follows a few seconds later
   // through the app's own sync, so waiting for the truth would look broken.
@@ -56,6 +63,8 @@ Item {
   function open(payloadJson) {
     root.draft = ""
     root.flash = ""
+    root.answer = ""
+    root.mode = "log"
     root.pending = ({})
     root.refresh()
     root.opened = true
@@ -168,6 +177,10 @@ Item {
     }
   }
 
+  // Enter appends to today's log. Shift+Enter files a task in the Inbox --
+  // unplanned and unparented, which is where a thought goes before it is a
+  // plan. The journal-bound variant (`rtn log --task`) is the other one, and
+  // this box deliberately does not offer it: one box, two obvious outcomes.
   function submit(asTask) {
     var body = root.draft.trim()
     if (body === "" || root.busy) return
@@ -176,10 +189,55 @@ Item {
     // Passed as arguments, never through a shell — the text is whatever was
     // typed, and quoting is not a security model.
     logProc.command = asTask
-      ? [root.rtnBin, "log", "--task", body]
+      ? [root.rtnBin, "add", body]
       : [root.rtnBin, "log", body]
     logProc.running = false
     logProc.running = true
+  }
+
+  function ask() {
+    var question = root.draft.trim()
+    if (question === "" || root.thinking) return
+    root.thinking = true
+    root.answer = ""
+    root.flash = ""
+    askProc.command = [root.rtnBin, "ask", question]
+    askProc.running = false
+    askProc.running = true
+  }
+
+  function setMode(next) {
+    root.mode = next
+    root.flash = ""
+    if (next === "log") root.answer = ""
+  }
+
+  Process {
+    id: askProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var reply = String(text || "").trim()
+        if (reply !== "") root.answer = reply
+      }
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var message = String(text || "").trim()
+        if (message !== "") root.flash = message.split("\n")[0]
+      }
+    }
+    onExited: function(code) {
+      root.thinking = false
+      if (code === 0) {
+        root.draft = ""
+        // A question may well have changed something.
+        root.refresh()
+      } else if (root.answer === "") {
+        root.answer = "That did not work. `rtn ask` needs the claude CLI on PATH."
+      }
+    }
   }
 
   function toggleTask(task) {
@@ -357,6 +415,7 @@ Item {
         Row {
           width: parent.width
           spacing: Style.spacing.xs
+          visible: !root.asking
           Text {
             text: "Today"
             textFormat: Text.PlainText
@@ -376,6 +435,7 @@ Item {
         // The "well done" state is worth drawing rather than leaving a gap.
         Text {
           width: parent.width
+          visible: !root.asking && text !== ""
           text: root.cache.ok && root.cache.tasks.length === 0
             ? "Nothing left for today."
             : (root.cache.ok ? "" : (root.cache.error + "  —  try: rtn doctor"))
@@ -383,12 +443,28 @@ Item {
           color: root.muted
           font.pixelSize: Style.font.body
           wrapMode: Text.WordWrap
-          visible: text !== ""
+        }
+
+        // The answer takes the list's place while asking, so the card does not
+        // grow a second panel and shift under the cursor.
+        Text {
+          width: parent.width
+          visible: root.asking
+          text: root.thinking ? "thinking…"
+                              : (root.answer !== "" ? root.answer
+                                                    : "Ask about today, your tasks, your week — or tell it to add something.")
+          textFormat: Text.PlainText          // a model's words are still a server's words
+          color: root.thinking || root.answer === "" ? root.muted : root.foreground
+          font.pixelSize: Style.font.body
+          wrapMode: Text.WordWrap
+          opacity: root.thinking ? 0.7 : 1.0
+          Behavior on opacity { NumberAnimation { duration: 180 } }
         }
 
         Column {
           width: parent.width
           spacing: Style.spacing.hairline
+          visible: !root.asking
           Repeater {
             model: root.cache.tasks
             delegate: TaskRow {
@@ -410,17 +486,28 @@ Item {
           width: parent.width
           foreground: root.foreground
           accent: root.accent
-          placeholderText: "log to today   ·   Shift+Enter for a task"
-          enabled: !root.busy
+          placeholderText: root.asking
+            ? "ask about your Routine   ·   Tab to go back"
+            : "log to today   ·   Shift+Enter files a task   ·   Tab to ask"
+          enabled: !root.busy && !root.thinking
           text: root.draft
           onTextChanged: root.draft = text
           focus: root.opened
 
           Keys.onPressed: function(event) {
+            var isEnter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
             if (event.key === Qt.Key_Escape) {
-              root.close()
+              // Esc walks back one step: out of asking first, then out of here.
+              if (root.asking) root.setMode("log")
+              else root.close()
               event.accepted = true
-            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+              root.setMode(root.asking ? "log" : "ask")
+              event.accepted = true
+            } else if (isEnter && root.asking) {
+              root.ask()
+              event.accepted = true
+            } else if (isEnter) {
               root.submit(event.modifiers & Qt.ShiftModifier)
               event.accepted = true
             }
@@ -429,7 +516,11 @@ Item {
 
         Text {
           width: parent.width
-          text: root.flash !== "" ? root.flash : "Esc to close   ·   click a box to tick it off"
+          text: {
+            if (root.flash !== "") return root.flash
+            if (root.asking) return "Enter to ask   ·   Tab back to logging   ·   Esc closes"
+            return "Enter logs   ·   Shift+Enter files a task   ·   Tab to ask"
+          }
           textFormat: Text.PlainText
           color: root.muted
           font.pixelSize: Style.font.caption

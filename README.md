@@ -48,6 +48,9 @@ rtn log "just had a ball"              # a note in today's journal
 rtn log --task pick up the milk        # a task, bound to today's entry
 cat notes.md | rtn log                 # markdown, parsed into blocks
 
+rtn add call the plumber               # a task in the Inbox, unplanned
+rtn ask "how much free time before my next meeting?"
+
 rtn today                              # the day: events, and the tasks in play
 rtn next                               # the next event, and how long there is
 rtn dashboard --json                   # everything the widget needs, one call
@@ -113,8 +116,25 @@ window in the way. It goes urgent inside five minutes. Left click focuses
 Routine, middle click joins the next meeting, right click refreshes.
 
 **An overlay** with the dashboard: the countdown ring, the next event with its
-platform and a Join button, today's list with working checkboxes, and a capture
-line. `Enter` logs a note, `Shift+Enter` logs a task, `Esc` closes.
+platform and a Join button, today's list with working checkboxes, and one box
+at the bottom that does three things.
+
+| | |
+| --- | --- |
+| `Enter` | append to today's journal |
+| `Shift+Enter` | file a task in the Inbox, unplanned |
+| `Tab` | switch the box to asking, and back |
+| `Esc` | out of asking, then out of the overlay |
+
+Asking runs `rtn ask`, which is the `claude` already on your PATH pointed at
+Routine's MCP server and nothing else. It can read anything and create or amend
+a task; it cannot delete, restructure, or message anyone — the tool list is an
+allowlist and that is the boundary. Today is put into its prompt before it
+starts, so the common questions are answered without a single tool call:
+
+> *how much free time before my next meeting?*
+> Today's only event is "Catch up" at 16:00. It is 10:55 now, so you have about
+> 5 hours free before it. — **one turn, 5.8s**
 
 Ticking a box completes the task and the note's checkbox together, because in
 Routine they are two views of one thing.
