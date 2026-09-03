@@ -99,6 +99,10 @@ enum Command {
         /// Model to use, e.g. haiku or sonnet
         #[arg(long)]
         model: Option<String>,
+        /// Agent to drive. Defaults to Omarchy's `default agent` when it is one
+        /// rtn knows how to run headlessly.
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Everything the bar widget needs, in one call
     ///
@@ -194,14 +198,14 @@ fn run() -> Result<(), String> {
         Command::Next => next_cmd(format),
         Command::Task(args) => task_cmd(args, format),
         Command::Add { title } => add_cmd(&title.join(" "), format),
-        Command::Ask { question, model } => {
+        Command::Ask { question, model, agent } => {
             let mut q = question.join(" ");
             if q.is_empty() && !std::io::stdin().is_terminal() {
                 std::io::stdin()
                     .read_to_string(&mut q)
                     .map_err(|e| format!("could not read stdin: {e}"))?;
             }
-            let (answer, payload) = ask::run(q.trim(), model.as_deref())?;
+            let (answer, payload) = ask::run(q.trim(), model.as_deref(), agent.as_deref())?;
             render::emit(&answer, &payload, format);
             Ok(())
         }

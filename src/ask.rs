@@ -18,6 +18,32 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+/// Omarchy keeps the user's chosen coding agent in a file, and `omarchy default
+/// agent` reads it. That convention says *which* agent; it does not say how to
+/// drive one headlessly, and there is no shared contract for that — each CLI
+/// differs, and so does how MCP servers reach it.
+///
+/// So this honours the choice for picking a driver, and is explicit when the
+/// chosen agent has none yet rather than silently running something else.
+fn omarchy_default_agent() -> Option<String> {
+    let path = std::path::PathBuf::from(std::env::var("HOME").ok()?)
+        .join(".config/omarchy/defaults/agent");
+    let name = std::fs::read_to_string(path).ok()?.trim().to_owned();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Agents `rtn ask` knows how to run. Claude is here because it takes its MCP
+/// config per invocation (`--mcp-config` with `--strict-mcp-config`), which is
+/// what lets the agent be handed Routine and nothing else — that scoping is the
+/// security boundary, not a convenience.
+///
+/// Others are drivable in principle — `grok agent`, `codex exec`,
+/// `opencode run` are all headless — but they take MCP servers from persistent
+/// config rather than per call, so pointing one at Routine means writing into
+/// the user's own agent config and inheriting whatever else is in it. That is a
+/// different bargain and wants deciding rather than assuming.
+const DRIVERS: &[&str] = &["claude"];
+
 /// Everything the agent may call. Read tools are broad; writes are the two a
 /// person would ask for out loud, and nothing that destroys or notifies.
 const ALLOWED: &[&str] = &[
@@ -80,9 +106,26 @@ plainly rather than trying. Confirm what you changed in one line."
     )
 }
 
-pub fn run(question: &str, model: Option<&str>) -> Result<(String, Value), String> {
+pub fn run(question: &str, model: Option<&str>, agent: Option<&str>) -> Result<(String, Value), String> {
     if question.trim().is_empty() {
         return Err("ask what?".into());
+    }
+
+    // Explicit flag, else Omarchy's default, else claude.
+    let chosen = agent
+        .map(str::to_owned)
+        .or_else(omarchy_default_agent)
+        .unwrap_or_else(|| "claude".into());
+    if !DRIVERS.contains(&chosen.as_str()) {
+        return Err(format!(
+            "your Omarchy default agent is `{chosen}`, which rtn cannot drive headlessly yet \
+             (it knows: {}).\n\
+             Either point this at one it knows — `rtn ask --agent claude`, or the plugin's \
+             `askAgent` setting — or change the default with `omarchy default agent claude`.\n\
+             Driving `{chosen}` needs Routine registered in its own MCP config rather than \
+             passed per call, which is a different trade and not yet made.",
+            DRIVERS.join(", ")
+        ));
     }
     // The agent gets Routine and nothing else, so the config is built here
     // rather than borrowed from whatever the user has registered.

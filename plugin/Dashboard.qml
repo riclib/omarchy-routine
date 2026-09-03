@@ -24,6 +24,15 @@ Item {
 
   readonly property string pluginDir: manifest?.__sourceDir
     || (Quickshell.env("HOME") + "/.config/omarchy/plugins/riclib.routine")
+  readonly property string askAgent: {
+    var v = shell?.pluginSetting?.(manifest?.id || "riclib.routine", "askAgent", "")
+    return String(v || "")
+  }
+  readonly property string askModel: {
+    var v = shell?.pluginSetting?.(manifest?.id || "riclib.routine", "askModel", "")
+    return String(v || "")
+  }
+
   readonly property string rtnBin: {
     var configured = shell?.pluginSetting?.(manifest?.id || "riclib.routine", "rtnBin", "rtn")
     return String(configured || "rtn")
@@ -201,7 +210,10 @@ Item {
     root.thinking = true
     root.answer = ""
     root.flash = ""
-    askProc.command = [root.rtnBin, "ask", question]
+    var argv = [root.rtnBin, "ask", question]
+    if (root.askAgent !== "") argv.push("--agent", root.askAgent)
+    if (root.askModel !== "") argv.push("--model", root.askModel)
+    askProc.command = argv
     askProc.running = false
     askProc.running = true
   }

@@ -137,6 +137,22 @@ Tab, say so, and watch it arrive:
 The new row animates into the list as the sentence appears, so the confirmation
 is the list changing rather than only a claim that it did.
 
+### Which agent
+
+Omarchy already has a convention for this — `omarchy default agent`, stored in
+`~/.config/omarchy/defaults/agent` — and `rtn ask` follows it rather than
+inventing its own. What Omarchy standardises is *which* agent; there is no
+shared contract for driving one headlessly, and MCP wiring in particular
+differs: Claude takes a config **per invocation**, so it can be handed Routine
+and nothing else, while `grok`, `codex` and `opencode` read theirs from
+persistent config.
+
+That scoping is the security boundary rather than a convenience, so `rtn ask`
+drives only agents where it holds — today that is `claude`. If your default is
+another, it says so and names the two ways out rather than quietly running
+something you did not choose. `--agent` and the plugin's `askAgent` setting
+override it.
+
 Asking runs `rtn ask`, which is the `claude` already on your PATH pointed at
 Routine's MCP server and nothing else. It can read anything and create or amend
 a task; it cannot delete, restructure, or message anyone — the tool list is an
