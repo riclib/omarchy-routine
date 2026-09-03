@@ -86,7 +86,7 @@ function num(value, fallback) {
 }
 
 function empty() {
-  return { ok: false, title: "", next: null, events: [], tasks: [], open: 0, error: "" }
+  return { ok: false, title: "", next: null, agenda: [], tasks: [], open: 0, error: "" }
 }
 
 function failed(message) {
@@ -95,18 +95,28 @@ function failed(message) {
   return blank
 }
 
+// One agenda item: a meeting, or a task blocked on the calendar. The kind
+// comes from the CLI, which is the only place that can tell them apart.
 function parseEvent(raw) {
   if (!raw || typeof raw !== "object") return null
+  var kind = raw.kind === "block" ? "block" : "meeting"
   return {
     id: str(raw.id),
+    kind: kind,
     title: str(raw.title),
     at: str(raw.at),
     start: str(raw.start),
+    end: str(raw.end),
+    length: num(raw.length, 0),
     minutes: num(raw.minutes, 0),
     platform: str(raw.platform),
     // A join link only exists when the CLI matched an allowlisted host. It is
     // never assembled here, and never taken from anywhere else.
-    join: safeUrl(raw.join)
+    join: safeUrl(raw.join),
+    // A block is a task with a time; the box on its row ticks that task, so
+    // the id goes through the same shape check as any id echoed back to rtn.
+    task: kind === "block" ? safeId(raw.task) : "",
+    done: kind === "block" && raw.done === true
   }
 }
 
@@ -128,10 +138,10 @@ function parseDashboard(raw) {
   out.next = parseEvent(doc.next)
   out.open = num(doc.open, 0)
 
-  var events = Array.isArray(doc.events) ? doc.events.slice(0, MAX_EVENTS) : []
-  for (var i = 0; i < events.length; i++) {
-    var e = parseEvent(events[i])
-    if (e) out.events.push(e)
+  var agenda = Array.isArray(doc.agenda) ? doc.agenda.slice(0, MAX_EVENTS) : []
+  for (var i = 0; i < agenda.length; i++) {
+    var e = parseEvent(agenda[i])
+    if (e) out.agenda.push(e)
   }
 
   var tasks = Array.isArray(doc.tasks) ? doc.tasks.slice(0, MAX_TASKS) : []
@@ -155,6 +165,19 @@ function minutesLeft(startIso, nowMs) {
   var start = Date.parse(startIso)
   if (!isFinite(start)) return null
   return Math.round((start - nowMs) / 60000)
+}
+
+// Over, by the clock. Recomputed locally, like the countdown.
+function isPast(endIso, nowMs) {
+  if (!endIso) return false
+  var end = Date.parse(endIso)
+  return isFinite(end) && end <= nowMs
+}
+
+// A length, said short: 30m, 1h, 1h30m.
+function length(minutes) {
+  if (!minutes || minutes <= 0) return ""
+  return gap(minutes)
 }
 
 // How long until it, said the way a person would. Short enough for a bar.

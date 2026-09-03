@@ -155,10 +155,12 @@ good, from a client's point of view.
 **An allocated task vanishes from `listTodaysTasks`** — neither `todo` nor
 `other` — and appears instead as an ordinary event in
 `listEventsForDateRange`, with the task's title and nothing in the list entry to
-mark it. Only `getEvent` shows `allocationOfTask: "task:…"`. So the dashboard,
-as of this note, drops the checkbox and puts the countdown ring on a grocery
-run. Tracked as #4; the fix is a third source in the Today union, joined by the
-event id in `allocationIds`.
+mark it. Only `getEvent` shows `allocationOfTask: "task:…"`, and the task's
+own done flag is `completed` on `getTask` (`status` is always null there). So
+the dashboard reads the day as an **agenda**: every event gets its `getEvent`
+(a millisecond each), a block is one with `allocationOfTask`, and its task is
+looked up for `completed` and kept out of the Anytime list. The ring counts to
+the next agenda item of either kind, by decision: a block is committed time.
 
 Corollary for capture: **create tasks unplanned and leave them there.** A task
 created with a journal `parent` and no `scheduled` comes back with no

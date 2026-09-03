@@ -16,7 +16,7 @@ cargo build --release
 cargo test --release --quiet
 # The QML model is plain JS and testable without a shell; the marketplace
 # review has historically landed on exactly what these cover.
-command -v node >/dev/null && node --test tests/ >/dev/null
+command -v node >/dev/null && node --test tests/*.test.js >/dev/null
 install -Dm755 target/release/rtn "$BIN"
 
 rm -rf "$PLUGIN"

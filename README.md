@@ -122,9 +122,21 @@ Two surfaces, one data source.
 window in the way. It goes urgent inside five minutes. Left click focuses
 Routine, middle click joins the next meeting, right click refreshes.
 
-**An overlay** with the dashboard: the countdown ring, the next event with its
-platform and a Join button, today's list with working checkboxes, and one box
-at the bottom that does three things.
+**An overlay** with the dashboard: the countdown ring, the next thing with its
+platform and a Join button, the day's agenda, the tasks with no time on them,
+and one box at the bottom that does three things.
+
+**The day is two lists.** *Scheduled* is everything with a time — meetings and
+task blocks together, in order, each drawn the same way so the eye reads the
+day as one sequence. A block keeps its checkbox and its length; a meeting keeps
+its platform glyph and Join. What is over collapses to "2 earlier" so the card
+does not grow all afternoon. *Anytime* is the rest of today's tasks: the
+journal's checkboxes and anything scheduled for the day without a time.
+
+**The ring counts to the next item of either kind.** A block is time you
+committed, and it gets the same seriousness as a meeting: the card says NEXT
+BLOCK, and the countdown is to it. Nothing appears twice — a task that is on
+the calendar is in the agenda and not in the list.
 
 | | |
 | --- | --- |
@@ -219,7 +231,8 @@ o.bind("MOD3 + R", "Routine dashboard", "omarchy-shell shell toggle riclib.routi
 
 **Settings:** `rtnBin` (leave it as `rtn` unless the graphical session does not
 inherit `~/.local/bin`, which is not guaranteed), `refreshSeconds`,
-`urgentMinutes`, `askAgent` and `askModel`.
+`urgentMinutes` and `askModel`. Asking also needs `~/.config/rtn/ask.yaml`, which
+`rtn ask` prints when it is missing — see [Which model](#which-model).
 
 ### Removing it
 
@@ -234,11 +247,13 @@ omarchy restart shell
 ```
 
 Then drop the `riclib.routine` entry from `bar.layout` in
-`~/.config/omarchy/shell.json` and the keybinding, if you added one. Nothing
-else was touched: no menu entry, no managed block in your Hyprland config, no
-file under `~/.config` that this plugin created. Your Routine data is
-untouched — the journal entries and tasks it made are yours and stay where they
-are.
+`~/.config/omarchy/shell.json` and the keybinding, if you added one. If you set
+up asking, `~/.config/rtn/ask.yaml` is yours to delete — it may hold your API
+key — and `$XDG_RUNTIME_DIR/rtn/` holds any conversation still open, on tmpfs
+that goes at logout anyway. Nothing else was touched: no menu entry, no managed
+block in your Hyprland config, no other file under `~/.config`. Your Routine
+data is untouched — the journal entries and tasks it made are yours and stay
+where they are.
 
 ---
 
@@ -304,7 +319,29 @@ chosen by whoever wrote the string.
 **Credentials.** The plugin holds none and never sees one. `rtn` reads
 Routine's token from `~/.config/Routine/mcp-auth.json` at call time; the token
 does not reach the shell's process state, its environment, or any file this
-plugin writes.
+plugin writes. The API key for `rtn ask` is the same story one layer down: it
+comes from `~/.config/rtn/ask.yaml` — refused unless the file is `0600` when
+the key is written in it, or read from an environment variable the file names —
+and is held as a `wire_secret::Secret` from the moment it is parsed, which
+prints as `<secret>` and is zeroed on drop. It reaches one request header and
+nothing else.
+
+**What leaves the machine.** Only `rtn ask` talks to anything beyond
+`127.0.0.1`, and only when you Tab into asking and press Enter. What it sends
+to the model provider you configured: your question, today's dashboard as
+markdown, the transcript of the current conversation, and the results of the
+Routine tools the model calls. The tools it may call are an allowlist of twenty-one
+in `src/ask.rs` — reads, plus create, amend and calendar-block a task — enforced
+again at execution, so a model naming a tool it was not given is refused. No
+delete, no table changes, no other workspace, no notices to other people. The
+loop is capped at four turns, 16 kB per tool result and sixty seconds.
+
+**Conversation state.** One conversation per opening of the overlay. `rtn`
+keeps it under `$XDG_RUNTIME_DIR/rtn/` at `0600` in a `0700` directory — tmpfs,
+private, gone at logout — forgets it after an hour idle, and deletes it when
+the overlay closes. The shell holds only the words it draws, clamped like any
+other answer. It carries tool results, which is real data, and that is why it
+is in the runtime directory and not under `~/.config`.
 
 **Subprocesses.** Every one is short-lived and started per action. Nothing is
 held open, so there is no producer to orphan; a second toggle while one is in
@@ -312,7 +349,7 @@ flight queues rather than racing, and `--json` output is read to completion or
 discarded.
 
 ```bash
-node --test tests/          # the bounds and the shape checks, no network, no shell
+node --test tests/*.test.js   # the bounds and the shape checks, no network, no shell
 omarchy plugin validate plugin/
 ```
 
@@ -321,6 +358,11 @@ omarchy plugin validate plugin/
 Routine, with its MCP server enabled in **Settings → MCP** (it is off by
 default). Rust to build. The plugin additionally wants Omarchy's Quickshell
 `omarchy-shell`; `rtn` alone needs neither.
+
+Asking is optional and needs an API key for a model on the Anthropic or OpenAI
+wire shape — Anthropic, OpenAI, xAI, a gateway, a local runner — configured in
+`~/.config/rtn/ask.yaml`. Everything else works without one. Node is needed
+only to run the plugin's tests.
 
 ## Field notes and gotchas
 
