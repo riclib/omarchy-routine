@@ -56,6 +56,7 @@ cat notes.md | rtn log                 # markdown, parsed into blocks
 
 rtn add call the plumber               # a task in the Inbox, unplanned
 rtn ask "how much free time before my next meeting?"
+rtn ask --session S "in 2 hours"        # a follow-up; same S, same conversation
 
 rtn today                              # the day: events, and the tasks in play
 rtn next                               # the next event, and how long there is
@@ -143,6 +144,18 @@ Tab, say so, and watch it arrive:
 The new row animates into the list as the sentence appears, so the confirmation
 is the list changing rather than only a claim that it did.
 
+**It is a conversation for as long as the overlay is open.** A follow-up can
+refer to what was just said, so the second line here needs no repetition:
+
+> *I need to pick up the car from the mechanic*
+> Created "Pick up the car from the mechanic", unplanned.
+> *in 2 hours*
+> Blocked 14:00–14:30 for it today.
+
+The transcript is `rtn`'s, kept under `$XDG_RUNTIME_DIR` — private, wiped at
+logout — and forgotten when the overlay closes or after an hour idle. The
+overlay only ever holds the words it draws.
+
 ### Which model
 
 `rtn ask` makes one direct call to a model you name, on either the Anthropic
@@ -174,8 +187,8 @@ key: env:XAI_API_KEY
 where the key would come from — and never the key. `--model` and the plugin's
 `askModel` setting override the model for one call.
 
-It can read anything and create or amend a task; it cannot delete, restructure,
-or message anyone. The tool list is an allowlist enforced twice — in what the
+It can read anything, create or amend a task, and put one on the calendar; it
+cannot delete, restructure, or message anyone. The tool list is an allowlist enforced twice — in what the
 model is offered, and again when it calls — and that is the boundary. It runs at
 most four turns and one minute. Today is put into its prompt before it starts,
 so questions it already covers need no tool call at all:
