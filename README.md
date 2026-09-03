@@ -217,6 +217,58 @@ immediately. The task completes at once and the note's checkbox follows a moment
 later as the app syncs the document, so the widget shows the tick straight away
 and reconciles when the note catches up.
 
+## Surface, for the security review
+
+Everything this plugin renders or acts on comes from outside the shell process,
+so the boundary is where it is bounded — once, on the way in, rather than at
+each place that draws it.
+
+**What crosses into the shell.** One thing: the stdout of `rtn`, spawned as an
+argument vector and never through a shell. `plugin/Model.js` is the only place
+that turns it into state, and it:
+
+- refuses a reply over **512 kB** before parsing it, because Quickshell's
+  `StdioCollector` has no size limit of its own and this is the only place the
+  size of what arrived can be questioned;
+- refuses JSON nested deeper than **12** before `JSON.parse` sees it, walking
+  the text with strings and escapes honoured so a bracket inside a string is
+  content rather than structure;
+- caps the lists (**20** events, **40** tasks) and every string — titles to 160
+  characters, a model's answer to 4000, an error line to 300;
+- takes a join URL **only** if it is `https://` with no whitespace, quotes or
+  angle brackets and under 500 characters — validated whole and never
+  truncated, since a shortened URL is a *different* URL to hand `xdg-open`;
+- takes a task id **only** if it matches `^(task|object):[A-Za-z0-9_:.~@+-]{1,220}$`,
+  because ids are echoed back to `rtn` as arguments.
+
+The clamps live at the boundary rather than at the sinks on purpose: an answer
+has four callers between the two QML files, and a fifth added later would
+inherit the guard rather than the gap.
+
+**What leaves the shell.** Only argument vectors — `rtn`, `xdg-open`,
+`routine-focus`. No string is ever assembled into a command line, so quoting is
+not load-bearing anywhere. `xdg-open` receives only a URL that passed the check
+above, which `rtn` had already matched against an allowlist of meeting hosts.
+
+**Rich text.** Every `Text` sets `textFormat: Text.PlainText`. Nothing here is
+left on Qt's `AutoText`, which guesses rich text, and rich text loads resources
+chosen by whoever wrote the string.
+
+**Credentials.** The plugin holds none and never sees one. `rtn` reads
+Routine's token from `~/.config/Routine/mcp-auth.json` at call time; the token
+does not reach the shell's process state, its environment, or any file this
+plugin writes.
+
+**Subprocesses.** Every one is short-lived and started per action. Nothing is
+held open, so there is no producer to orphan; a second toggle while one is in
+flight queues rather than racing, and `--json` output is read to completion or
+discarded.
+
+```bash
+node --test tests/          # the bounds and the shape checks, no network, no shell
+omarchy plugin validate plugin/
+```
+
 ## Requirements
 
 Routine, with its MCP server enabled in **Settings → MCP** (it is off by

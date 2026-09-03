@@ -58,7 +58,7 @@ BarWidget {
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var message = String(text || "").trim()
+        var message = Model.text(text, Model.MAX_LINE)
         if (message !== "") root.cache = Model.failed(message.split("\n")[0])
       }
     }

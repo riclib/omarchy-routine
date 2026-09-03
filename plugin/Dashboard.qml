@@ -126,7 +126,7 @@ Item {
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var message = String(text || "").trim()
+        var message = Model.text(text, Model.MAX_LINE)
         if (message !== "") root.cache = Model.failed(message.split("\n")[0])
       }
     }
@@ -143,7 +143,7 @@ Item {
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var message = String(text || "").trim()
+        var message = Model.text(text, Model.MAX_LINE)
         if (message !== "") root.flash = message.split("\n")[0]
       }
     }
@@ -172,7 +172,7 @@ Item {
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var message = String(text || "").trim()
+        var message = Model.text(text, Model.MAX_LINE)
         if (message !== "") root.flash = message.split("\n")[0]
       }
     }
@@ -229,14 +229,17 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var reply = String(text || "").trim()
+        // Clamped here, at the boundary, rather than at the Text that draws
+        // it: the sink is not the only caller, and a second one added later
+        // would inherit the gap rather than the guard.
+        var reply = Model.text(text, Model.MAX_ANSWER)
         if (reply !== "") root.answer = reply
       }
     }
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var message = String(text || "").trim()
+        var message = Model.text(text, Model.MAX_LINE)
         if (message !== "") root.flash = message.split("\n")[0]
       }
     }
@@ -253,6 +256,8 @@ Item {
   }
 
   function toggleTask(task) {
+    // Model.safeId() blanks anything that is not shaped like a Routine id, so
+    // an empty one here means "did not pass", not "absent".
     if (task.id === "") return
     var next = !isDone(task)
     // A **copy**, not the same object mutated. Assigning the identical
