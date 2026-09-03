@@ -45,8 +45,14 @@ Item {
   // costs a model call; ask is deliberate, and Tab is how you say which.
   property string mode: "log"                 // "log" | "ask"
   readonly property bool asking: mode === "ask"
-  property string answer: ""
   property bool thinking: false
+
+  // One conversation per opening. The transcript is rtn's, keyed by an id
+  // minted here; what this holds is only what is drawn — the question and
+  // the answer, as text. The session ends when the overlay closes.
+  property string session: ""
+  property var thread: []                     // [{ q, a, failed }]
+  readonly property var visibleThread: root.thread.slice(-3)
 
   // Ticked off here the moment you click, rather than after a re-read. The
   // task updates at once but the note's checkbox follows a few seconds later
@@ -68,14 +74,22 @@ Item {
   function open(payloadJson) {
     root.draft = ""
     root.flash = ""
-    root.answer = ""
+    root.showPast = false
+    root.thread = []
+    root.session = Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10)
     root.mode = "log"
     root.pending = ({})
     root.refresh()
     root.opened = true
   }
 
-  function close() { root.opened = false }
+  function close() {
+    root.opened = false
+    // Nothing to forget unless something was asked.
+    if (root.thread.length > 0)
+      root.enqueue([root.rtnBin, "ask", "--session", root.session, "--end"])
+    root.thread = []
+  }
   function toggle() { root.opened ? root.close() : root.open("{}") }
 
   function refresh() {
@@ -92,8 +106,19 @@ Item {
   readonly property int openCount: {
     var n = 0
     for (var i = 0; i < cache.tasks.length; i++) if (!isDone(cache.tasks[i])) n++
+    for (var j = 0; j < cache.agenda.length; j++) {
+      var e = cache.agenda[j]
+      if (e.kind === "block" && !isDone({ id: e.task, done: e.done })) n++
+    }
     return n
   }
+
+  // The agenda splits at the clock: what is over collapses to one line so the
+  // card does not grow all afternoon, and what is still to come stays.
+  property bool showPast: false
+  readonly property var pastAgenda: cache.agenda.filter(function(e) { return Model.isPast(e.end, root.nowMs) })
+  readonly property var comingAgenda: cache.agenda.filter(function(e) { return !Model.isPast(e.end, root.nowMs) })
+  readonly property var shownAgenda: root.showPast ? cache.agenda : root.comingAgenda
 
   Process {
     id: dash
@@ -204,31 +229,39 @@ Item {
     var question = root.draft.trim()
     if (question === "" || root.thinking) return
     root.thinking = true
-    root.answer = ""
     root.flash = ""
-    var argv = [root.rtnBin, "ask", question]
+    var argv = [root.rtnBin, "ask", "--session", root.session, question]
     if (root.askModel !== "") argv.push("--model", root.askModel)
+    askProc.question = question
     askProc.command = argv
     askProc.running = false
     askProc.running = true
   }
 
+  // Tab out and back keeps the thread: the conversation is the opening,
+  // not the mode.
   function setMode(next) {
     root.mode = next
     root.flash = ""
-    if (next === "log") root.answer = ""
+  }
+
+  function reply(question, answer, failed) {
+    var next = root.thread.slice()
+    next.push({ q: question, a: answer, failed: failed })
+    root.thread = next
   }
 
   Process {
     id: askProc
+    property string question: ""
+    property string answer: ""
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         // Clamped here, at the boundary, rather than at the Text that draws
         // it: the sink is not the only caller, and a second one added later
         // would inherit the gap rather than the guard.
-        var reply = Model.text(text, Model.MAX_ANSWER)
-        if (reply !== "") root.answer = reply
+        askProc.answer = Model.text(text, Model.MAX_ANSWER)
       }
     }
     stderr: StdioCollector {
@@ -241,12 +274,15 @@ Item {
     onExited: function(code) {
       root.thinking = false
       if (code === 0) {
+        root.reply(askProc.question, askProc.answer, false)
         root.draft = ""
         // A question may well have changed something.
         root.refresh()
-      } else if (root.answer === "") {
-        root.answer = "That did not work. `rtn ask` needs a model and a key in ~/.config/rtn/ask.yaml; `rtn doctor` says what it found."
+      } else {
+        root.reply(askProc.question, askProc.answer !== "" ? askProc.answer
+          : "That did not work. `rtn ask` needs a model and a key in ~/.config/rtn/ask.yaml; `rtn doctor` says what it found.", true)
       }
+      askProc.answer = ""
     }
   }
 
@@ -269,6 +305,10 @@ Item {
   function join() {
     if (cache.next && cache.next.join !== "")
       root.enqueue(["xdg-open", cache.next.join])
+  }
+
+  function joinItem(item) {
+    if (item && item.join !== "") root.enqueue(["xdg-open", item.join])
   }
 
   Timer {
@@ -366,7 +406,7 @@ Item {
             spacing: Style.spacing.xxs
 
             Text {
-              text: root.cache.next ? "NEXT" : ""
+              text: root.cache.next ? (root.cache.next.kind === "block" ? "NEXT BLOCK" : "NEXT") : ""
               textFormat: Text.PlainText
               color: root.muted
               font.pixelSize: Style.font.caption
@@ -423,12 +463,71 @@ Item {
           }
         }
 
-        // ---- today's list -------------------------------------------------
+        // ---- the agenda: meetings and blocks, in order ----------------------
+        Row {
+          width: parent.width
+          spacing: Style.spacing.xs
+          visible: root.cache.ok && root.cache.agenda.length > 0
+          Text {
+            text: "Scheduled"
+            textFormat: Text.PlainText
+            color: root.foreground
+            font.pixelSize: Style.font.subtitle
+            font.weight: Font.DemiBold
+          }
+          Text {
+            text: root.pastAgenda.length === 0 ? ""
+              : (root.showPast ? "hide earlier" : root.pastAgenda.length + " earlier")
+            textFormat: Text.PlainText
+            color: pastArea.containsMouse ? root.foreground : root.muted
+            font.pixelSize: Style.font.body
+            anchors.verticalCenter: parent.verticalCenter
+            MouseArea {
+              id: pastArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.showPast = !root.showPast
+            }
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.spacing.hairline
+          visible: root.cache.ok && root.cache.agenda.length > 0
+
+          add: Transition {
+            NumberAnimation { properties: "opacity"; from: 0; to: 1; duration: 260 }
+            NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
+          }
+          move: Transition {
+            NumberAnimation { properties: "y"; duration: 220; easing.type: Easing.OutCubic }
+          }
+
+          Repeater {
+            model: root.shownAgenda
+            delegate: AgendaRow {
+              required property var modelData
+              width: contentColumn.width
+              item: modelData
+              done: modelData.kind === "block" && root.isDone({ id: modelData.task, done: modelData.done })
+              past: Model.isPast(modelData.end, root.nowMs)
+              foreground: root.foreground
+              muted: root.muted
+              accent: root.accent
+              onToggled: root.toggleTask({ id: modelData.task, done: modelData.done })
+              onJoined: { root.joinItem(modelData); root.close() }
+            }
+          }
+        }
+
+        // ---- anytime today: the tasks with no time on them ---------------
         Row {
           width: parent.width
           spacing: Style.spacing.xs
           Text {
-            text: "Today"
+            text: "Anytime"
             textFormat: Text.PlainText
             color: root.foreground
             font.pixelSize: Style.font.subtitle
@@ -448,7 +547,7 @@ Item {
           width: parent.width
           visible: text !== ""
           text: root.cache.ok && root.cache.tasks.length === 0
-            ? "Nothing left for today."
+            ? (root.cache.agenda.length > 0 ? "Nothing without a time." : "Nothing left for today.")
             : (root.cache.ok ? "" : (root.cache.error + "  —  try: rtn doctor"))
           textFormat: Text.PlainText
           color: root.muted
@@ -488,29 +587,64 @@ Item {
         // ---- capture --------------------------------------------------------
         // Below the day, above the box: you asked from what you can see, and the
         // answer lands next to it rather than in place of it.
+        // The last few exchanges, oldest dimmed, so a follow-up is read in
+        // the light of what it follows. rtn remembers more than is drawn.
         Rectangle {
           width: parent.width
-          height: reply.implicitHeight + Style.space(14)
+          height: threadColumn.implicitHeight + Style.space(14)
           radius: Style.space(5)
           color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.07)
-          visible: root.asking && (root.thinking || root.answer !== "")
+          visible: root.asking && (root.thinking || root.thread.length > 0)
           opacity: visible ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: 200 } }
 
-          Text {
-            id: reply
+          Column {
+            id: threadColumn
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             anchors.margins: Style.space(7)
-            text: root.thinking ? "thinking…" : root.answer
-            // A model's words are still a server's words.
-            textFormat: Text.PlainText
-            color: root.thinking ? root.muted : root.foreground
-            font.pixelSize: Style.font.body
-            wrapMode: Text.WordWrap
-            opacity: root.thinking ? 0.7 : 1.0
-            Behavior on opacity { NumberAnimation { duration: 180 } }
+            spacing: Style.spacing.sm
+
+            Repeater {
+              model: root.visibleThread
+              delegate: Column {
+                required property var modelData
+                required property int index
+                width: threadColumn.width
+                spacing: Style.spacing.xxs
+                opacity: index === root.visibleThread.length - 1 && !root.thinking ? 1.0 : 0.6
+
+                Text {
+                  width: parent.width
+                  text: "› " + modelData.q
+                  textFormat: Text.PlainText
+                  color: root.muted
+                  font.pixelSize: Style.font.bodySmall
+                  wrapMode: Text.WordWrap
+                  maximumLineCount: 2
+                  elide: Text.ElideRight
+                }
+                Text {
+                  width: parent.width
+                  text: modelData.a
+                  // A model's words are still a server's words.
+                  textFormat: Text.PlainText
+                  color: modelData.failed ? root.muted : root.foreground
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                }
+              }
+            }
+
+            Text {
+              visible: root.thinking
+              text: "thinking…"
+              textFormat: Text.PlainText
+              color: root.muted
+              font.pixelSize: Style.font.body
+              opacity: 0.7
+            }
           }
         }
 

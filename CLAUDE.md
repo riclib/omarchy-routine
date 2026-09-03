@@ -143,6 +143,25 @@ batch ("Week 36" in the app). It is absent, not null, when unset.
 match `scheduled_input`. The app can unplan a task; a client cannot yet. Until
 there is a way to say it, do not build an affordance that needs one.
 
+**`tasks_allocateTask` is the only way to a time of day, and it schedules as a
+side effect.** Measured 2026-09-03: `{task, date, start_time: "14:00",
+duration_minutes: 30}` answers `{"eventId": "event:…"}`, the task's
+`allocationIds` gains that id, and `scheduled` is set to the date whether or
+not it was before. Deleting the event with `personal_events_deleteEvent` empties
+`allocationIds` and leaves `scheduled` where it is — and scheduling being
+one-way, nothing over MCP can put it back. An allocated task is on the day for
+good, from a client's point of view.
+
+**An allocated task vanishes from `listTodaysTasks`** — neither `todo` nor
+`other` — and appears instead as an ordinary event in
+`listEventsForDateRange`, with the task's title and nothing in the list entry to
+mark it. Only `getEvent` shows `allocationOfTask: "task:…"`, and the task's
+own done flag is `completed` on `getTask` (`status` is always null there). So
+the dashboard reads the day as an **agenda**: every event gets its `getEvent`
+(a millisecond each), a block is one with `allocationOfTask`, and its task is
+looked up for `completed` and kept out of the Anytime list. The ring counts to
+the next agenda item of either kind, by decision: a block is committed time.
+
 Corollary for capture: **create tasks unplanned and leave them there.** A task
 created with a journal `parent` and no `scheduled` comes back with no
 `scheduled` key, and the app still shows it under Unplanned with a chip naming
@@ -359,12 +378,28 @@ It fetches Routine's own tool list over MCP (`tools/list`), filters it to
 and hand-copying them is how they go stale. The loop is bounded three ways:
 four turns, 16 kB per tool result, sixty seconds wall clock.
 
+**A `--session` makes it a conversation.** The overlay mints an id when it
+opens and says `--end` when it closes; `rtn` keeps the transcript under
+`$XDG_RUNTIME_DIR/rtn/` at 0600, forgets it after an hour idle, and trims it by
+whole exchanges — a tool call and its result must stay paired or the API refuses
+the request. The follow-up needs no new intelligence: the `createTask` result in
+turn one carries the task id that "in 2 hours" in turn two needs.
+
+**The system prompt carries no clock.** It is the cached prefix, and `It is now
+13:10` in it changed every minute, so across questions the cache never hit — in
+a conversation that is the whole prefix, every turn. The time is prefixed to
+the user message instead; the TODAY block stays in the system prompt and is
+refreshed per question, so it changes exactly when the day did, which after a
+write is the one time re-reading it is worth paying for. On the Anthropic wire
+tools come before system in the prefix, so a changed TODAY still leaves the
+twenty schemas cached.
+
 **The allowed tool list is the security boundary, and it is enforced twice**:
 the model is only offered allowed tools, and every call is checked again at the
 point of execution, because a model can name a tool it was never given. A
 refused call comes back to the model as a tool result saying so, not as a dead
-question. Reads are broad; writes are `createTask` and `updateTask`; there is no
-delete, no `tables_alter_*`, no other workspace and no `notices_createNotice`.
+question. Reads are broad; writes are `createTask`, `updateTask` and
+`allocateTask`; there is no delete, no `tables_alter_*`, no other workspace and no `notices_createNotice`.
 Verified 2026-09-03 with a scripted model: a `tasks_deleteTask` it asked for came
 back as `rtn does not allow tasks_deleteTask` and nothing was deleted.
 

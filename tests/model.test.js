@@ -15,7 +15,7 @@ const src = fs
 const Model = {}
 new Function("exports", src + "\n;Object.assign(exports, {" +
   "str, text, num, empty, failed, parseDashboard, minutesLeft, gap, gapSentence," +
-  "platformIcon, within_depth, safeUrl, safeId, MAX_ANSWER, MAX_LINE, MAX_TITLE})")(Model)
+  "platformIcon, within_depth, safeUrl, safeId, isPast, length, MAX_ANSWER, MAX_LINE, MAX_TITLE})")(Model)
 
 test("a title arrives collapsed and clamped", () => {
   assert.equal(Model.str("\n Automate  the\n thing \n"), "Automate the thing")
@@ -79,15 +79,54 @@ test("a good payload keeps its shape and drops what fails a check", () => {
     open: 1,
     next: { title: "Catch up", at: "16:00", start: "2026-09-03T16:00:00+03:00",
             platform: "teams", join: "https://teams.microsoft.com/meet/1" },
-    events: new Array(90).fill({ title: "e", at: "09:00" }),
+    agenda: new Array(90).fill({ title: "e", at: "09:00" }),
     tasks: [{ id: "task:aB0_cD1eF2gH3iJ4kL5m", title: "real", done: false },
             { id: "javascript:alert(1)", title: "hostile id", done: false }],
   }))
   assert.equal(d.ok, true)
   assert.equal(d.next.join, "https://teams.microsoft.com/meet/1")
-  assert.ok(d.events.length <= 20, "event list is capped")
+  assert.ok(d.agenda.length <= 20, "the agenda is capped")
   assert.equal(d.tasks[0].id, "task:aB0_cD1eF2gH3iJ4kL5m")
   assert.equal(d.tasks[1].id, "", "an id that fails its shape check is blanked")
+})
+
+test("a block carries a checked task id and a meeting carries none", () => {
+  const d = Model.parseDashboard(JSON.stringify({
+    title: "t", open: 2,
+    agenda: [
+      { kind: "block", title: "Pick up car", at: "14:00", end: "2026-09-03T15:00:00+03:00",
+        length: 60, task: "task:XFl8t4rCDnQt3OBBDxvk7", done: false },
+      { kind: "block", title: "hostile", at: "15:00", task: "--help; reboot", done: true },
+      { kind: "meeting", title: "Catch up", at: "16:00", join: "https://teams.microsoft.com/meet/9" },
+      { kind: "meeting", title: "bad link", at: "17:00", join: "file:///etc/passwd" },
+      { title: "no kind at all", at: "18:00", task: "task:abc", done: true },
+    ],
+    tasks: [],
+  }))
+  assert.equal(d.ok, true)
+  assert.equal(d.agenda[0].kind, "block")
+  assert.equal(d.agenda[0].task, "task:XFl8t4rCDnQt3OBBDxvk7")
+  assert.equal(d.agenda[0].length, 60)
+  assert.equal(d.agenda[1].task, "", "a block whose task fails the shape check cannot be ticked")
+  assert.equal(d.agenda[1].done, true)
+  // The per-row Join goes through the same gate as the NEXT card's.
+  assert.equal(d.agenda[2].join, "https://teams.microsoft.com/meet/9")
+  assert.equal(d.agenda[3].join, "")
+  // An unknown kind is a meeting: it gets no box, and its task is ignored.
+  assert.equal(d.agenda[4].kind, "meeting")
+  assert.equal(d.agenda[4].task, "")
+  assert.equal(d.agenda[4].done, false)
+})
+
+test("what is over is told by the clock, and a length is said short", () => {
+  const noon = Date.parse("2026-09-03T12:00:00+03:00")
+  assert.ok(Model.isPast("2026-09-03T11:30:00+03:00", noon))
+  assert.ok(!Model.isPast("2026-09-03T12:30:00+03:00", noon))
+  assert.ok(!Model.isPast("", noon), "no end is not past")
+  assert.ok(!Model.isPast("garbage", noon))
+  assert.equal(Model.length(30), "30m")
+  assert.equal(Model.length(90), "1h30m")
+  assert.equal(Model.length(0), "")
 })
 
 test("the countdown says what a person would say", () => {

@@ -12,6 +12,7 @@ mod journal;
 mod mcp;
 mod md;
 mod render;
+mod session;
 
 use clap::{Args, Parser, Subcommand};
 use md::Checkbox;
@@ -91,14 +92,25 @@ enum Command {
     /// Ask a question about your Routine, or tell it to do something
     ///
     /// One direct call to the model named in ~/.config/rtn/ask.yaml, with
-    /// Routine's own tools and nothing else. It can read anything and create or
-    /// amend a task; it cannot delete, restructure, or message anyone.
+    /// Routine's own tools and nothing else. It can read anything, create or
+    /// amend a task, and put one on the calendar; it cannot delete,
+    /// restructure, or message anyone.
+    ///
+    /// With --session, questions in the same session are one conversation and
+    /// a follow-up can refer to what was just said. The overlay mints an id
+    /// when it opens and ends the session when it closes.
     Ask {
         /// The question. Omit it to read stdin.
         question: Vec<String>,
         /// Model to use, overriding the config, e.g. claude-haiku-4-5
         #[arg(long)]
         model: Option<String>,
+        /// Continue a conversation, by an id of your choosing
+        #[arg(long, value_name = "ID")]
+        session: Option<String>,
+        /// End the session instead of asking; its transcript is forgotten
+        #[arg(long, requires = "session")]
+        end: bool,
     },
     /// Everything the bar widget needs, in one call
     ///
@@ -194,14 +206,24 @@ fn run() -> Result<(), String> {
         Command::Next => next_cmd(format),
         Command::Task(args) => task_cmd(args, format),
         Command::Add { title } => add_cmd(&title.join(" "), format),
-        Command::Ask { question, model } => {
+        Command::Ask { question, model, session, end } => {
+            if end {
+                let id = session.as_deref().unwrap_or_default();
+                let was = session::end(id)?;
+                render::emit(
+                    if was { "*session ended*" } else { "*no such session*" },
+                    &json!({ "session": id, "ended": was }),
+                    format,
+                );
+                return Ok(());
+            }
             let mut q = question.join(" ");
             if q.is_empty() && !std::io::stdin().is_terminal() {
                 std::io::stdin()
                     .read_to_string(&mut q)
                     .map_err(|e| format!("could not read stdin: {e}"))?;
             }
-            let (answer, payload) = ask::run(q.trim(), model.as_deref())?;
+            let (answer, payload) = ask::run(q.trim(), model.as_deref(), session.as_deref())?;
             render::emit(&answer, &payload, format);
             Ok(())
         }

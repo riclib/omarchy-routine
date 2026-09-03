@@ -17,7 +17,7 @@
 //! allowed tools, and a call is checked again at the point of execution,
 //! because a model can name a tool it was never given.
 
-use crate::mcp;
+use crate::{mcp, session};
 use llm_wires::{ChatRequest, Message, Provider, Tool, ToolCall, Usage, Wire};
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
@@ -64,9 +64,11 @@ const ALLOWED: &[&str] = &[
     "tables_searchTableRows",
     "tables_getObject",
     "buildLink",
-    // write — deliberately only these two
+    // write — deliberately only these three: make one, amend one, put one on
+    // the calendar. Nothing that destroys or notifies.
     "tasks_createTask",
     "tasks_updateTask",
+    "tasks_allocateTask",
 ];
 
 // ---------------------------------------------------------------------------
@@ -342,6 +344,8 @@ pub struct Outcome {
     pub usage: Usage,
     /// Tool names, in the order they were called.
     pub calls: Vec<String>,
+    /// The whole transcript as sent and received, prior turns included.
+    pub messages: Vec<Message>,
 }
 
 /// Send, run whatever tools come back, send again — at most [`MAX_TURNS`]
@@ -367,6 +371,7 @@ async fn converse(
                 turns: turn,
                 usage,
                 calls,
+                messages: req.messages,
             });
         }
         for call in &resp.tool_calls {
@@ -382,15 +387,22 @@ async fn converse(
     ))
 }
 
-fn system_prompt(now: &str, workspace: &str, context: &str) -> String {
+/// The system prompt carries no clock. It is the cached prefix, and a minute
+/// stamp in it would change it every question and defeat the cache on every
+/// turn of a conversation; the time goes in the user message instead. The
+/// TODAY block does change when the day does — after a write, typically — and
+/// that is the one time re-reading the prefix is worth it.
+fn system_prompt(workspace: &str, context: &str) -> String {
     // The field notes, as a briefing. Everything here cost time to find, and a
     // model that does not know it makes exactly the mistakes we already made.
     format!(
         "You are an assistant for the user's Routine (routine.co) workspace, reached \
-from a desktop bar. It is now {now}. The personal workspace is {workspace}.\n\
+from a desktop bar. The personal workspace is {workspace}. Each question is \
+prefixed with the time it was asked.\n\
 \n\
-TODAY, already fetched for you — answer from this when it is enough, and only \
-reach for a tool when the question needs something it does not contain:\n\
+TODAY, already fetched for you and refreshed before every question — answer \
+from this when it is enough, and only reach for a tool when the question needs \
+something it does not contain:\n\
 {context}\n\
 \n\
 Answer in at most a short paragraph unless asked for more. Prefer doing over \
@@ -411,17 +423,28 @@ payload; use getTask for detail.\n\
 not promise to unplan something.\n\
 - Create tasks UNPLANNED unless the user gave a day. The parent already records \
 when it was captured.\n\
+- A time of day means allocateTask: it blocks the task on the calendar (date, \
+start_time as HH:MM, duration_minutes) and also schedules it for that day, \
+which cannot be undone. Default to 30 minutes when no length was given.\n\
+- A follow-up refers to what was just said. \"In 2 hours\" after creating a task \
+means that task; use the id from the earlier result rather than searching.\n\
 \n\
-You may read freely, and you may create or amend a task. You cannot delete \
-anything, change a table's shape, or message another person — if asked, say so \
-plainly rather than trying. Confirm what you changed in one line."
+You may read freely, and you may create or amend a task, or put one on the \
+calendar. You cannot delete anything, change a table's shape, or message another \
+person — if asked, say so plainly rather than trying. Confirm what you changed \
+in one line."
     )
 }
 
-pub fn run(question: &str, model: Option<&str>) -> Result<(String, Value), String> {
+/// A session id from the overlay, or none for a one-off from a terminal.
+pub fn run(question: &str, model: Option<&str>, session_id: Option<&str>) -> Result<(String, Value), String> {
     if question.trim().is_empty() {
         return Err("ask what?".into());
     }
+    let transcript = match session_id {
+        Some(id) => session::load(id)?,
+        None => session::Transcript::default(),
+    };
     let config = Config::load()?;
     let key = config.key()?;
     let client = mcp::Client::connect().map_err(|e| e.to_string())?;
@@ -434,10 +457,15 @@ pub fn run(question: &str, model: Option<&str>) -> Result<(String, Value), Strin
     // overlay are about today and need no tool call at all.
     let (now, context) = crate::ask_context();
 
+    // Prior exchanges go ahead of the question; what this turn adds is
+    // everything from `first_new` on, and that is what gets saved.
+    let mut messages = transcript.messages();
+    let first_new = messages.len();
+    messages.push(Message::user(format!("({now}) {question}")));
     let req = ChatRequest {
-        messages: vec![Message::user(question)],
+        messages,
         tools: offered,
-        system: system_prompt(&now, &workspace, &context),
+        system: system_prompt(&workspace, &context),
         max_tokens: Some(MAX_TOKENS),
         cache_stable_prefix: true,
         ..ChatRequest::default()
@@ -463,6 +491,16 @@ pub fn run(question: &str, model: Option<&str>) -> Result<(String, Value), Strin
         Ok::<_, String>((provider.info(), outcome))
     })?;
 
+    let mut transcript = transcript;
+    if let Some(id) = session_id {
+        transcript.push(&outcome.messages[first_new..]);
+        // A transcript that cannot be saved costs the next follow-up its
+        // memory, not this question its answer.
+        if let Err(e) = session::save(id, &transcript) {
+            eprintln!("rtn: {e}");
+        }
+    }
+
     let payload = json!({
         "question": question,
         "answer": outcome.answer,
@@ -470,6 +508,8 @@ pub fn run(question: &str, model: Option<&str>) -> Result<(String, Value), Strin
         "model": info.model,
         "turns": outcome.turns,
         "tools": outcome.calls,
+        "session": session_id,
+        "exchange": transcript.len(),
         "duration_ms": started.elapsed().as_millis() as u64,
         "usage": {
             "input": outcome.usage.input,
@@ -685,6 +725,28 @@ mod tests {
         assert_eq!(second[2].tool_call_id.as_deref(), Some("call-tasks_getTask"));
         assert_eq!(second[2].content, r#"ran tasks_getTask with {"task":"task:1"}"#);
         assert_eq!(seen[1].tools, seen[0].tools, "tools are offered on every turn");
+    }
+
+    #[test]
+    fn a_follow_up_goes_out_behind_the_earlier_exchange() {
+        let p = Scripted::new(vec![says("At 14:00.")]);
+        let mut req = ChatRequest::ask("s", "(13:10) in 2 hours");
+        req.messages.insert(0, Message::assistant("Created \"Pick up car\" (task:1)."));
+        req.messages.insert(0, Message::user("(13:09) I need to pick up the car"));
+        let out = block_on(converse(&p, req, &mut |_| String::new())).unwrap();
+        assert_eq!(out.messages.len(), 4, "two prior, the question, the answer");
+        assert_eq!(out.messages[2].content, "(13:10) in 2 hours");
+        assert_eq!(out.messages[3].content, "At 14:00.");
+        assert_eq!(p.seen.lock().unwrap()[0].messages.len(), 3, "the model saw the history");
+    }
+
+    #[test]
+    fn the_system_prompt_is_stable_and_names_the_calendar_write() {
+        let s = system_prompt("workspace:w", "today");
+        assert!(!s.contains("It is now"), "no clock in the cached prefix");
+        assert!(s.contains("allocateTask"));
+        assert!(s.contains("cannot be undone"));
+        assert!(ALLOWED.contains(&"tasks_allocateTask"));
     }
 
     #[test]
