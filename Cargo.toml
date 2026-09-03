@@ -12,8 +12,18 @@ serde_json = "1"
 ureq = { version = "3", default-features = false, features = ["json"] }
 time = { version = "0.3", features = ["formatting", "parsing", "macros", "local-offset"] }
 termimad = "0.35.3"
+# `rtn ask` only. These bring TLS, HTTP and an async runtime into a binary that
+# had none; accepted for the model call, and nothing else here should use them.
+llm-wires = "0.1"
+wire-secret = "0.1"
+serde_yaml_ng = "0.10"
+tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+zeroize = "1"
 
 [profile.release]
 strip = true
 opt-level = "z"
 lto = true
+
+[dev-dependencies]
+async-trait = "0.1"

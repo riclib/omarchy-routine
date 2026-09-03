@@ -90,19 +90,15 @@ enum Command {
     },
     /// Ask a question about your Routine, or tell it to do something
     ///
-    /// Runs the `claude` on your PATH against Routine's MCP server and nothing
-    /// else. It can read anything and create or amend a task; it cannot delete,
-    /// restructure, or message anyone.
+    /// One direct call to the model named in ~/.config/rtn/ask.yaml, with
+    /// Routine's own tools and nothing else. It can read anything and create or
+    /// amend a task; it cannot delete, restructure, or message anyone.
     Ask {
         /// The question. Omit it to read stdin.
         question: Vec<String>,
-        /// Model to use, e.g. haiku or sonnet
+        /// Model to use, overriding the config, e.g. claude-haiku-4-5
         #[arg(long)]
         model: Option<String>,
-        /// Agent to drive. Defaults to Omarchy's `default agent` when it is one
-        /// rtn knows how to run headlessly.
-        #[arg(long)]
-        agent: Option<String>,
     },
     /// Everything the bar widget needs, in one call
     ///
@@ -198,14 +194,14 @@ fn run() -> Result<(), String> {
         Command::Next => next_cmd(format),
         Command::Task(args) => task_cmd(args, format),
         Command::Add { title } => add_cmd(&title.join(" "), format),
-        Command::Ask { question, model, agent } => {
+        Command::Ask { question, model } => {
             let mut q = question.join(" ");
             if q.is_empty() && !std::io::stdin().is_terminal() {
                 std::io::stdin()
                     .read_to_string(&mut q)
                     .map_err(|e| format!("could not read stdin: {e}"))?;
             }
-            let (answer, payload) = ask::run(q.trim(), model.as_deref(), agent.as_deref())?;
+            let (answer, payload) = ask::run(q.trim(), model.as_deref())?;
             render::emit(&answer, &payload, format);
             Ok(())
         }
@@ -450,5 +446,22 @@ fn doctor() -> Result<(), String> {
     let jrn = journal::Journal::discover(&client).map_err(|e| e.to_string())?;
     println!("server  answering on 127.0.0.1:8765");
     println!("space   {}\njournal {}", jrn.workspace, jrn.table);
+
+    // `rtn ask` is optional, so none of this fails the check; it says what
+    // asking would do, and never the key.
+    println!("ask     {}", ask::config_path().display());
+    match ask::Config::load() {
+        Ok(config) => println!("        {}", config.describe()),
+        Err(_) if !ask::config_path().exists() => {
+            println!("        not written yet; `rtn ask` prints what goes in it")
+        }
+        Err(e) => println!("        {}", e.lines().next().unwrap_or("unreadable")),
+    }
+    let (offered, missing) = ask::tools(&client.list_tools().map_err(|e| e.to_string())?);
+    if missing.is_empty() {
+        println!("        {} tools allowed, all offered by Routine", offered.len());
+    } else {
+        println!("        {} tools allowed; Routine no longer offers: {}", offered.len() + missing.len(), missing.join(", "));
+    }
     Ok(())
 }

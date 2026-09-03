@@ -335,7 +335,7 @@ The ordered block-id list is the concurrency token. There is no ETag.
   the note was edited by hand, a write built on the pre-edit id list correctly
   refused rather than resurrecting deleted blocks.
 
-## The agent path, and what it costs
+## The ask path, and what it costs
 
 Quick-create splits by how the input was submitted, not by guessing at it:
 
@@ -350,13 +350,33 @@ typed — cue-detection is a guess, and a capture box that sometimes costs five
 seconds and a model call is a capture box you stop trusting. Enter and
 Shift+Enter never do.
 
-`rtn ask` runs `claude -p` against the user's existing auth (no API key to
-manage) with `--strict-mcp-config`, so it sees Routine's tools and nothing else
-— not the user's other MCP servers, and none of Claude Code's own file or shell
-tools. **The allowed tool list is the security boundary**: reads are broad,
-writes are `createTask` and `updateTask`, and there is no delete, no
-`tables_alter_*`, no other workspace and no `notices_createNotice` — asked to
-delete something it says it cannot and the task survives, verified.
+`rtn ask` makes one direct HTTPS call to the model named in
+`~/.config/rtn/ask.yaml`, on the Anthropic or the OpenAI wire shape through
+[`llm-wires`](https://github.com/riclib/llm-wires), with the key held as a
+`wire_secret::Secret` from the moment it is parsed to the header it lands in.
+It fetches Routine's own tool list over MCP (`tools/list`), filters it to
+`ALLOWED`, and hands the schemas over untouched — they are already on the wire,
+and hand-copying them is how they go stale. The loop is bounded three ways:
+four turns, 16 kB per tool result, sixty seconds wall clock.
+
+**The allowed tool list is the security boundary, and it is enforced twice**:
+the model is only offered allowed tools, and every call is checked again at the
+point of execution, because a model can name a tool it was never given. A
+refused call comes back to the model as a tool result saying so, not as a dead
+question. Reads are broad; writes are `createTask` and `updateTask`; there is no
+delete, no `tables_alter_*`, no other workspace and no `notices_createNotice`.
+Verified 2026-09-03 with a scripted model: a `tasks_deleteTask` it asked for came
+back as `rtn does not allow tasks_deleteTask` and nothing was deleted.
+
+Until 2026-09-03 this ran the `claude` CLI headlessly with `--allowedTools`.
+Three things retired it: the harness's startup was most of the latency; Omarchy
+standardises *which* coding agent but there is no headless contract across the
+ten, and MCP wiring differs per agent, so the path refused to run for anyone
+whose default was not `claude`; and the allowlist was a flag passed to someone
+else's process rather than a match arm in this one. The measurements below were
+taken through that harness and are kept because they are the reason for the
+shape: the priming is what makes it one turn, and one turn is what makes it
+usable.
 
 The thing that makes it usable is **priming the prompt**. Today's dashboard goes
 in before the agent starts, which costs 10 ms locally and removes the model
@@ -384,8 +404,9 @@ Measured on one representative input:
 Latency is the harness, not inference — Haiku with tools was no faster than
 Fable. The win comes from deleting the tool round trips: the helper does in
 ~80ms of local HTTP what the agent spent six model turns on. The remaining ~13s
-is `claude -p` startup and is the floor short of dropping to the SDK, which
-would cost the no-API-key property.
+was `claude -p` startup — which is what the direct call removes, at the price of
+needing a key. The tool loop's own overhead, measured against a local fake
+provider with live Routine behind it, is 6 ms for three turns.
 
 Two things the no-tools model got wrong, both handled by the validator rather
 than by prompting harder: it flattened `time` into top-level

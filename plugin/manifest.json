@@ -25,7 +25,6 @@
       "rtnBin": "rtn",
       "refreshSeconds": 60,
       "urgentMinutes": 5,
-      "askAgent": "",
       "askModel": ""
     },
     "schema": [
@@ -57,18 +56,11 @@
         "description": "How close the next event has to be before the widget takes the urgent colour. Zero never does."
       },
       {
-        "key": "askAgent",
-        "type": "string",
-        "label": "Agent for Tab-to-ask",
-        "defaultValue": "",
-        "description": "Left empty this follows Omarchy's own `omarchy default agent`. rtn can currently drive claude headlessly; other agents take their MCP servers from persistent config rather than per invocation, so pointing one at Routine is a different setup and is not done for you."
-      },
-      {
         "key": "askModel",
         "type": "string",
         "label": "Model for Tab-to-ask",
         "defaultValue": "",
-        "description": "Empty uses the agent's own default. `haiku` answers a question about today in about six seconds for a few cents; a larger model is slower and dearer for the same answer."
+        "description": "Empty uses the model in ~/.config/rtn/ask.yaml, which is also where the provider and the key live. A small model such as `claude-haiku-4-5` answers a question about today in one turn for a fraction of a cent; a larger one is slower and dearer for the same answer."
       }
     ]
   }
