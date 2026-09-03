@@ -3,6 +3,12 @@
 [Routine](https://routine.co) on the Linux desktop: a command line, and an
 [Omarchy](https://omarchy.org) shell plugin built on top of it.
 
+https://github.com/user-attachments/assets/b1c56689-b43f-43f7-8ab5-fcf1a2c761f0
+
+and
+
+https://github.com/user-attachments/assets/acdaa5f6-b59b-4719-a9a8-20c41bccf5f9
+
 Both are built on the MCP server Routine ships — nothing is scraped, nothing is
 reverse-engineered, and no credential leaves the machine. Routine did the part
 that makes this possible; this is just a second surface onto it.
